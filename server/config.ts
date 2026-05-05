@@ -1,0 +1,132 @@
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+import { z } from "zod"
+
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
+const defaultDashboardConfigPath = path.join(projectRoot, "dashboard.config.json")
+const defaultEnvFilePath = path.join(projectRoot, ".env")
+
+type LoadConfigOptions = {
+  dashboardConfigPath?: string
+  envFilePath?: string
+}
+
+const fileConfigSchema = z.object({
+  port: z.number().int().positive().max(65535).optional(),
+  host: z.string().trim().min(1).optional(),
+  opencodeDbPath: z.string().trim().min(1).optional(),
+  analyticsDbPath: z.string().trim().min(1).optional(),
+  dashboardToken: z.string().trim().min(1).optional(),
+  dashboardTokenFile: z.string().trim().min(1).optional(),
+})
+
+const envSchema = z.object({
+  PORT: z.coerce.number().int().positive().max(65535).default(41777),
+  HOST: z.string().trim().min(1).default("127.0.0.1"),
+  OPENCODE_DB_PATH: z.string().trim().min(1).default(path.join(os.homedir(), ".local", "share", "opencode", "opencode.db")),
+  ANALYTICS_DB_PATH: z.string().trim().min(1).default("./.run/analytics.db"),
+  DASHBOARD_TOKEN: z.string().trim().min(1).optional(),
+  DASHBOARD_TOKEN_FILE: z.string().trim().min(1).optional(),
+})
+
+export type AppConfig = {
+  port: number
+  host: string
+  opencodeDbPath: string
+  analyticsDbPath: string
+  dashboardToken: string
+  dashboardTokenFilePath?: string
+}
+
+function resolveProjectPath(target: string) {
+  return path.isAbsolute(target) ? target : path.resolve(projectRoot, target)
+}
+
+function loadDashboardFileConfig(configPath = defaultDashboardConfigPath) {
+  if (!fs.existsSync(configPath)) {
+    return {}
+  }
+
+  const raw = fs.readFileSync(configPath, "utf8")
+  const parsed = JSON.parse(raw) as unknown
+  return fileConfigSchema.parse(parsed)
+}
+
+function loadDotEnvConfig(envFilePath = defaultEnvFilePath) {
+  if (!fs.existsSync(envFilePath)) {
+    return {}
+  }
+
+  const parsed: Record<string, string> = {}
+  const lines = fs.readFileSync(envFilePath, "utf8").split(/\r?\n/)
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue
+    }
+
+    const separatorIndex = trimmed.indexOf("=")
+    if (separatorIndex <= 0) {
+      continue
+    }
+
+    const key = trimmed.slice(0, separatorIndex).trim()
+    const value = trimmed.slice(separatorIndex + 1).trim()
+    if (key) {
+      parsed[key] = value
+    }
+  }
+
+  return parsed
+}
+
+export function readDashboardTokenFile(tokenFilePath: string) {
+  const raw = fs.readFileSync(tokenFilePath, "utf8").trim()
+
+  if (!raw) {
+    throw new Error(`Dashboard token file is empty: ${tokenFilePath}`)
+  }
+
+  if (raw.startsWith("{")) {
+    const parsed = z.object({ token: z.string().trim().min(1) }).parse(JSON.parse(raw) as unknown)
+    return parsed.token
+  }
+
+  return raw
+}
+
+export function loadConfig(
+  input: Record<string, string | undefined> = process.env,
+  options: LoadConfigOptions = {},
+): AppConfig {
+  const fileConfig = loadDashboardFileConfig(options.dashboardConfigPath ?? defaultDashboardConfigPath)
+  const envFileConfig = loadDotEnvConfig(options.envFilePath ?? defaultEnvFilePath)
+  const env = envSchema.parse({
+    PORT: input.PORT ?? envFileConfig.PORT ?? fileConfig.port,
+    HOST: input.HOST ?? envFileConfig.HOST ?? fileConfig.host,
+    OPENCODE_DB_PATH: input.OPENCODE_DB_PATH ?? envFileConfig.OPENCODE_DB_PATH ?? fileConfig.opencodeDbPath,
+    ANALYTICS_DB_PATH: input.ANALYTICS_DB_PATH ?? envFileConfig.ANALYTICS_DB_PATH ?? fileConfig.analyticsDbPath,
+    DASHBOARD_TOKEN: input.DASHBOARD_TOKEN ?? envFileConfig.DASHBOARD_TOKEN ?? fileConfig.dashboardToken,
+    DASHBOARD_TOKEN_FILE: input.DASHBOARD_TOKEN_FILE ?? envFileConfig.DASHBOARD_TOKEN_FILE ?? fileConfig.dashboardTokenFile,
+  })
+
+  const dashboardTokenFilePath = env.DASHBOARD_TOKEN_FILE ? resolveProjectPath(env.DASHBOARD_TOKEN_FILE) : undefined
+  const dashboardToken = env.DASHBOARD_TOKEN
+    ?? (dashboardTokenFilePath ? readDashboardTokenFile(dashboardTokenFilePath) : undefined)
+
+  if (!dashboardToken) {
+    throw new Error("DASHBOARD_TOKEN or DASHBOARD_TOKEN_FILE is required")
+  }
+
+  return {
+    port: env.PORT,
+    host: env.HOST,
+    opencodeDbPath: resolveProjectPath(env.OPENCODE_DB_PATH),
+    analyticsDbPath: resolveProjectPath(env.ANALYTICS_DB_PATH),
+    dashboardToken,
+    dashboardTokenFilePath,
+  }
+}

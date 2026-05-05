@@ -1,0 +1,7 @@
+{
+  "host": "127.0.0.1",
+  "port": 41777,
+  "opencodeDbPath": "<path-to-opencode-db>",
+  "analyticsDbPath": "./.run/analytics.db",
+  "dashboardTokenFile": "./.run/dashboard.token"
+}

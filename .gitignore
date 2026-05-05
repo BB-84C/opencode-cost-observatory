@@ -1,0 +1,13 @@
+.run/
+node_modules/
+dist/
+tmp/
+.tmp-test-config/
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.log
+*.pid
+.env
+dashboard.config.json
