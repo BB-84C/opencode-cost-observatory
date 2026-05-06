@@ -1,6 +1,7 @@
 import { useState } from "react"
 
-import type { CreatePricingRecordPayload, LeaderboardSession, PricingCoverageGap, PricingRecordResponse } from "../api/client"
+import type { CreatePricingRecordPayload, LeaderboardSession, ObservedPricingCoverageRow, PricingCoverageGap, PricingRecordResponse } from "../api/client"
+import { deriveManualPricingIdentity } from "../lib/pricingIdentity"
 import { CollapsiblePanel } from "./CollapsiblePanel"
 
 function formatUsd(value: number | null, locale?: Intl.LocalesArgument) {
@@ -29,6 +30,8 @@ function formatEnum(value: string, locale?: Intl.LocalesArgument) {
     stale: ["Stale", "过期"],
     active: ["Active", "有效"],
     disabled: ["Disabled", "已禁用"],
+    priced: ["Priced", "已定价"],
+    missing: ["Missing", "缺失"],
   }
   const item = map[value]
   return item ? item[zh ? 1 : 0] : value
@@ -45,15 +48,6 @@ function safeHttpUrl(value: string | null | undefined) {
   } catch {
     return null
   }
-}
-
-function pricingRecordIdPart(value: string) {
-  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
-  return normalized || "unknown"
-}
-
-function missingPricingRecordId(gap: PricingCoverageGap) {
-  return `price-${pricingRecordIdPart(gap.providerId)}-${pricingRecordIdPart(gap.modelId)}-manual`
 }
 
 function localCopy(locale?: Intl.LocalesArgument) {
@@ -76,6 +70,9 @@ function localCopy(locale?: Intl.LocalesArgument) {
         current: "当前",
         freshnessUnavailable: "新鲜度不可用",
         noMissingPricing: "未检测到缺失定价",
+        noObservedCoverage: "暂无观测供应商覆盖",
+        pricedVia: "定价经由",
+        unpriced: "未定价",
         expand: "展开",
         collapse: "收起",
         models: "个模型",
@@ -98,6 +95,9 @@ function localCopy(locale?: Intl.LocalesArgument) {
         current: "Current",
         freshnessUnavailable: "Freshness unavailable",
         noMissingPricing: "No missing pricing detected",
+        noObservedCoverage: "No observed provider coverage",
+        pricedVia: "priced via",
+        unpriced: "unpriced",
         expand: "Expand",
         collapse: "Collapse",
         models: "models",
@@ -109,6 +109,7 @@ export function LeaderboardTables(props: {
   costSessions?: LeaderboardSession[]
   tokenSessions?: LeaderboardSession[]
   pricingRecords?: PricingRecordResponse[]
+  observedPricingCoverage?: ObservedPricingCoverageRow[]
   pricingCoverageGaps?: PricingCoverageGap[]
   points?: Array<{ inputTokens?: number; outputTokens?: number; reasoningTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; bucketStart: string }>
   locale?: Intl.LocalesArgument
@@ -121,6 +122,7 @@ export function LeaderboardTables(props: {
     expensiveSessions: string
     tokenSessions: string
     pricingDrilldown: string
+    observedProviderCoverage: string
     windowBreakdown: string
     pricingFreshness: string
     title: string
@@ -152,6 +154,7 @@ export function LeaderboardTables(props: {
   const costSessions = props.costSessions ?? []
   const tokenSessions = props.tokenSessions ?? []
   const pricingRows = props.pricingRecords ?? []
+  const observedPricingCoverage = props.observedPricingCoverage ?? []
   const editablePricingRows = pricingRows.filter((record) => record.enabled === true && record.supersededTime == null)
   const pricingCoverageGaps = props.pricingCoverageGaps ?? []
   const copy = localCopy(props.locale)
@@ -163,6 +166,7 @@ export function LeaderboardTables(props: {
   const costSummary = costSessions.length === 0 ? copy.noSessions : `${costSessions.length} ${copy.sessions} · ${formatUsd(costSessions.reduce((sum, session) => sum + (session.totalCostUsd ?? 0), 0), props.locale)}`
   const tokenSummary = tokenSessions.length === 0 ? copy.noSessions : `${tokenSessions.length} ${copy.sessions} · ${tokenSessions.reduce((sum, session) => sum + session.totalTokens, 0).toLocaleString(props.locale)} ${copy.tokens}`
   const pricingSummary = pricingRows.length === 0 ? copy.unavailable : `${pricingRows.length} ${copy.records}`
+  const observedCoverageSummary = observedPricingCoverage.length === 0 ? copy.unavailable : `${observedPricingCoverage.length} ${copy.records}`
   const freshnessSummary = pricingRows.length === 0 ? copy.unavailable : `${pricingRows.length} ${copy.records} · ${Math.round(missingPricingGap * 100)}% ${copy.gap}`
   const missingSummary = pricingCoverageGaps.length > 0
     ? `${pricingCoverageGaps.length} ${missingModelUnit} · ${Math.round(missingPricingGap * 100)}% ${copy.gap}`
@@ -230,11 +234,13 @@ export function LeaderboardTables(props: {
       return
     }
 
+    const pricingIdentity = deriveManualPricingIdentity({ providerId: gap.providerId, modelId: gap.modelId })
+
     props.onCreatePricing?.({
-      id: missingPricingRecordId(gap),
-      canonicalVendor: gap.providerId,
-      canonicalModel: gap.modelId,
-      vendorModelId: gap.modelId,
+      id: pricingIdentity.id,
+      canonicalVendor: pricingIdentity.canonicalVendor,
+      canonicalModel: pricingIdentity.canonicalModel,
+      vendorModelId: pricingIdentity.vendorModelId,
       currency: "USD",
       inputPrice,
       outputPrice,
@@ -373,6 +379,47 @@ export function LeaderboardTables(props: {
                       </>
                     ) : null}
                   </div>
+                </article>
+              )
+            })}
+          </div>
+        )}
+      </CollapsiblePanel>
+      <CollapsiblePanel title={props.labels.observedProviderCoverage} summary={observedCoverageSummary} defaultOpen scrollBody className="leaderboard-panel" labels={{ expand: copy.expand, collapse: copy.collapse }}>
+        {observedPricingCoverage.length === 0 ? (
+          <p className="pricing-card-empty">{copy.noObservedCoverage}</p>
+        ) : (
+          <div className="pricing-card-grid">
+            {observedPricingCoverage.map((row) => {
+              const sourceUrl = safeHttpUrl(row.sourceUrl)
+
+              return (
+                <article className="pricing-card" key={`${row.observedProviderId}/${row.observedModelId}`} aria-label={`Observed pricing coverage for ${row.observedProviderId} ${row.observedModelId}`}>
+                  <div className="pricing-card__header">
+                    <div className="pricing-card__identity">
+                      <strong className="pricing-card__model">{row.observedProviderId} / {row.observedModelId}</strong>
+                      <span className="pricing-card__vendor-id">
+                        {row.canonicalVendor && row.canonicalModel ? `${copy.pricedVia} ${row.canonicalVendor} / ${row.canonicalModel}` : copy.unpriced}
+                      </span>
+                    </div>
+                    <div className="pricing-card__badges" aria-label={`${props.labels.source} and ${props.labels.confidence}`}>
+                      <span>{formatEnum(row.resolutionStatus, props.locale)}</span>
+                      <span>{row.confidence ?? copy.unavailable}</span>
+                    </div>
+                  </div>
+
+                  <div className="pricing-card__source">
+                    <span>{props.labels.source}</span>
+                    <span>{row.sourceType ? formatEnum(row.sourceType, props.locale) : copy.unavailable}</span>
+                    {sourceUrl ? <a href={sourceUrl}>{row.sourceUrl}</a> : null}
+                  </div>
+
+                  <dl className="pricing-card__meta">
+                    <div><dt>{copy.messages}</dt><dd>{row.messageCount.toLocaleString(props.locale)}</dd></div>
+                    <div><dt>{copy.tokens}</dt><dd>{row.totalTokens.toLocaleString(props.locale)}</dd></div>
+                    <div><dt>{copy.firstSeen}</dt><dd>{formatTime(row.firstSeen)}</dd></div>
+                    <div><dt>{copy.lastSeen}</dt><dd>{formatTime(row.lastSeen)}</dd></div>
+                  </dl>
                 </article>
               )
             })}

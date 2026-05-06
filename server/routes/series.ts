@@ -1,6 +1,7 @@
 import { Router } from "express"
 
 import { buildSeries, type SeriesGranularity, type SeriesMetric } from "../services/dashboard-analytics"
+import { tryRespondWithAnalyticsBusy } from "../services/sqlite-busy"
 import { parseDashboardWindowQuery } from "../services/window-range"
 
 const validGranularities = new Set<SeriesGranularity>(["hourly", "daily", "weekly", "monthly"])
@@ -23,7 +24,7 @@ function parseMetrics(raw: unknown): SeriesMetric[] | null {
   return metrics.every((metric) => validMetrics.has(metric as SeriesMetric)) ? metrics as SeriesMetric[] : null
 }
 
-export function seriesRoutes(analyticsDbPath: string) {
+export function seriesRoutes(analyticsDbPath: string, pricingDbPath: string) {
   const router = Router()
 
   router.get("/series/:granularity", (req, res) => {
@@ -44,20 +45,30 @@ export function seriesRoutes(analyticsDbPath: string) {
       return
     }
 
+    let parsedWindow
     try {
-      const parsedWindow = typeof rawWindow === "string"
+      parsedWindow = typeof rawWindow === "string"
         ? parseDashboardWindowQuery(req.query, new Date(Date.now()))
         : null
-      res.json(buildSeries(analyticsDbPath, {
-        granularity,
-        metrics,
-        window: parsedWindow ?? "all",
-      }))
     } catch (error) {
       res.status(400).json({
         error: "invalid_window",
         message: error instanceof Error ? error.message : "Invalid window",
       })
+      return
+    }
+
+    try {
+      res.json(buildSeries(analyticsDbPath, pricingDbPath, {
+        granularity,
+        metrics,
+        window: parsedWindow ?? "all",
+      }))
+    } catch (error) {
+      if (tryRespondWithAnalyticsBusy(res, error)) {
+        return
+      }
+      throw error
     }
   })
 

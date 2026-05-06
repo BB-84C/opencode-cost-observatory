@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { authenticateWithLocalhostToken, createPricingRecord, deletePricingRecord, fetchBackendControlStatus, fetchBackendDiagnostics, fetchCostLeaderboard, fetchOverview, fetchPricingRecords, fetchSeries, fetchSyncStatus, fetchTokenLeaderboard, requestRefresh, restartBackendService, startBackendService, updatePricingRecord, type AuthSessionResponse, type BackendControlResponse, type BackendDiagnosticsResponse, type CreatePricingRecordPayload, type DashboardWindow, type LeaderboardSession, type LocalhostAuthPayload, type OverviewResponse, type PricingRecordResponse, type RefreshResponse, type SeriesGranularity, type SeriesMetric, type SeriesResponse } from "../api/client"
+import { authenticateWithLocalhostToken, createPricingRecord, deletePricingRecord, fetchBackendControlStatus, fetchBackendDiagnostics, fetchCostLeaderboard, fetchObservedPricingCoverage, fetchOverview, fetchPricingRecords, fetchSeries, fetchSyncStatus, fetchTokenLeaderboard, requestRefresh, restartBackendService, startBackendService, updatePricingRecord, type AuthSessionResponse, type BackendControlResponse, type BackendDiagnosticsResponse, type CreatePricingRecordPayload, type DashboardWindow, type LeaderboardSession, type LocalhostAuthPayload, type ObservedPricingCoverageRow, type OverviewResponse, type PricingRecordResponse, type RefreshResponse, type SeriesGranularity, type SeriesMetric, type SeriesResponse } from "../api/client"
+import { isRetryableAnalyticsBusyError } from "../lib/dashboard-api-error"
+import { retryAnalyticsBusy } from "../lib/dashboard-retry"
 
 export type { DashboardWindow } from "../api/client"
 
@@ -64,6 +66,9 @@ const ALERT_COPY = {
     unauthenticatedDetail: "Authenticate this local browser with a localhost token or .run/dashboard.token file.",
     loadFailedTitle: "Dashboard data load failed",
     retryUpdateAction: "Retry Update",
+    pricingRegistryEmptyTitle: "Pricing registry empty",
+    pricingRegistryEmptyAction: "Restore pricing registry",
+    pricingRegistryEmptyDetail: "Token analytics are available, but the durable pricing registry is empty so spend and coverage are incomplete.",
     updateFailedTitle: "Update failed",
     inspectSyncLogsAction: "Inspect sync logs",
     updateFailedDetail: "The latest synchronous update did not complete.",
@@ -90,6 +95,9 @@ const ALERT_COPY = {
     unauthenticatedDetail: "使用 localhost 令牌或 .run/dashboard.token 文件认证此本机浏览器。",
     loadFailedTitle: "仪表盘数据加载失败",
     retryUpdateAction: "重试更新",
+    pricingRegistryEmptyTitle: "定价注册表为空",
+    pricingRegistryEmptyAction: "恢复定价注册表",
+    pricingRegistryEmptyDetail: "令牌分析数据可用，但持久定价注册表为空，因此支出和覆盖率不完整。",
     updateFailedTitle: "更新失败",
     inspectSyncLogsAction: "检查同步日志",
     updateFailedDetail: "最近一次同步更新未完成。",
@@ -166,6 +174,10 @@ function backendControlReportsStopped(response: BackendControlResponse) {
 }
 
 function isBackendUnreachableError(error: unknown) {
+  if (isRetryableAnalyticsBusyError(error)) {
+    return false
+  }
+
   if (error instanceof TypeError) {
     return true
   }
@@ -174,7 +186,7 @@ function isBackendUnreachableError(error: unknown) {
   return /failed to fetch|networkerror|network error|load failed|backend unreachable|econnrefused|connection refused|dashboard_request_failed:50[0234]/i.test(message)
 }
 
-export function buildAlertItems(args: { overview: OverviewResponse; error: string | null; isLoading: boolean; authenticated: boolean; backendStatus: "offline" | "unauthenticated" | "authenticated"; updateStatus: RefreshResponse | null; locale?: Intl.LocalesArgument }) {
+export function buildAlertItems(args: { overview: OverviewResponse; pricingRecordCount: number; error: string | null; isLoading: boolean; authenticated: boolean; backendStatus: "offline" | "unauthenticated" | "authenticated"; updateStatus: RefreshResponse | null; locale?: Intl.LocalesArgument }) {
   if (args.isLoading) {
     return []
   }
@@ -191,6 +203,15 @@ export function buildAlertItems(args: { overview: OverviewResponse; error: strin
   }
   if (args.error) {
     alerts.push({ id: "dashboard-error", title: copy.loadFailedTitle, severity: "warning", action: copy.retryUpdateAction, detail: args.error })
+  }
+  if (authenticatedDataLoaded && args.pricingRecordCount === 0) {
+    alerts.push({
+      id: "pricing-registry-empty",
+      title: copy.pricingRegistryEmptyTitle,
+      severity: "critical",
+      action: copy.pricingRegistryEmptyAction,
+      detail: copy.pricingRegistryEmptyDetail,
+    })
   }
   if (args.backendStatus !== "offline" && args.updateStatus?.status === "failed") {
     alerts.push({ id: "update-failed", title: copy.updateFailedTitle, severity: "critical", action: copy.inspectSyncLogsAction, detail: args.updateStatus.error ?? copy.updateFailedDetail })
@@ -236,6 +257,7 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
   const [costLeaderboard, setCostLeaderboard] = useState<LeaderboardSession[]>([])
   const [tokenLeaderboard, setTokenLeaderboard] = useState<LeaderboardSession[]>([])
   const [pricingRecords, setPricingRecords] = useState<PricingRecordResponse[]>([])
+  const [observedPricingCoverage, setObservedPricingCoverage] = useState<ObservedPricingCoverageRow[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -270,6 +292,7 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
         setCostLeaderboard([])
         setTokenLeaderboard([])
         setPricingRecords([])
+        setObservedPricingCoverage([])
         setLastLoadedAt(null)
       }
       throw diagnosticsError
@@ -291,17 +314,19 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
       setCostLeaderboard([])
       setTokenLeaderboard([])
       setPricingRecords([])
+      setObservedPricingCoverage([])
       setLastLoadedAt(null)
       return diagnosticsResponse
     }
 
-    const [overviewResponse, seriesResponse, syncResponse, costLeaderboardResponse, tokenLeaderboardResponse, pricingRecordsResponse] = await Promise.all([
+    const [overviewResponse, seriesResponse, syncResponse, costLeaderboardResponse, tokenLeaderboardResponse, pricingRecordsResponse, observedCoverageResponse] = await Promise.all([
       fetchOverview(nextWindow),
       fetchSeries(nextGranularity, nextWindow, ["cost", "inputTokens", "outputTokens", "reasoningTokens", "cacheReadTokens", "cacheWriteTokens"]),
       fetchSyncStatus(),
       fetchCostLeaderboard(),
       fetchTokenLeaderboard(),
       fetchPricingRecords(),
+      fetchObservedPricingCoverage(),
     ])
 
     if (!requestTracker.current.isCurrent(requestId)) {
@@ -314,9 +339,14 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
     setCostLeaderboard(costLeaderboardResponse.sessions)
     setTokenLeaderboard(tokenLeaderboardResponse.sessions)
     setPricingRecords(pricingRecordsResponse.records)
+    setObservedPricingCoverage(observedCoverageResponse.rows)
     setLastLoadedAt(Date.now())
     return diagnosticsResponse
   }, [])
+
+  const loadWithBusyRetry = useCallback(async (requestId: number, nextWindow: DashboardWindow, nextGranularity: SeriesGranularity) => {
+    return await retryAnalyticsBusy(() => load(requestId, nextWindow, nextGranularity))
+  }, [load])
 
   useEffect(() => {
     let cancelled = false
@@ -327,7 +357,7 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
       const requestId = requestTracker.current.issue()
 
       try {
-        await load(requestId, window, effectiveGranularity)
+        await loadWithBusyRetry(requestId, window, effectiveGranularity)
       } catch (loadError) {
         if (!cancelled && requestTracker.current.isCurrent(requestId)) {
           setError("dashboard_load_failed")
@@ -344,7 +374,7 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
     return () => {
       cancelled = true
     }
-  }, [effectiveGranularity, load, window])
+  }, [effectiveGranularity, loadWithBusyRetry, window])
 
   const reload = useCallback(async () => {
     if (!authSession.authenticated) {
@@ -356,7 +386,7 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
     const requestId = requestTracker.current.issue()
 
     try {
-      await load(requestId, window, effectiveGranularity)
+      await loadWithBusyRetry(requestId, window, effectiveGranularity)
     } catch (refreshError) {
       if (requestTracker.current.isCurrent(requestId)) {
         setError("dashboard_refresh_failed")
@@ -366,7 +396,7 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
         setIsRefreshing(false)
       }
     }
-  }, [authSession.authenticated, effectiveGranularity, load, window])
+  }, [authSession.authenticated, effectiveGranularity, loadWithBusyRetry, window])
 
   const markBackendStopped = useCallback(() => {
     requestTracker.current.issue()
@@ -380,6 +410,7 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
     setCostLeaderboard([])
     setTokenLeaderboard([])
     setPricingRecords([])
+    setObservedPricingCoverage([])
     setLastLoadedAt(null)
   }, [])
 
@@ -425,7 +456,7 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
 
       const requestId = requestTracker.current.issue()
       const query = latestQuery.current
-      await load(requestId, query.window, query.granularity)
+      await loadWithBusyRetry(requestId, query.window, query.granularity)
     } catch (refreshError) {
       if (isBackendUnreachableError(refreshError)) {
         markBackendStopped()
@@ -439,7 +470,7 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
         setIsRefreshing(false)
       }
     }
-  }, [authSession.authenticated, load, markBackendStopped])
+  }, [authSession.authenticated, loadWithBusyRetry, markBackendStopped])
 
   const authenticateBackend = useCallback(async (payload?: LocalhostAuthPayload) => {
     setBackendActionStatus("authenticating")
@@ -449,18 +480,18 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
       setBackendActionStatus("authenticated")
       const requestId = requestTracker.current.issue()
       const query = latestQuery.current
-      await load(requestId, query.window, query.granularity)
+      await loadWithBusyRetry(requestId, query.window, query.granularity)
     } catch {
       setBackendActionStatus("failed")
       setError("dashboard_auth_failed")
     }
-  }, [load])
+  }, [loadWithBusyRetry])
 
   const reloadAfterBackendControl = useCallback(async () => {
     const requestId = requestTracker.current.issue()
     const query = latestQuery.current
-    await load(requestId, query.window, query.granularity)
-  }, [load])
+    await loadWithBusyRetry(requestId, query.window, query.granularity)
+  }, [loadWithBusyRetry])
 
   const checkBackend = useCallback(async () => {
     setBackendControlStatus("checking")
@@ -506,7 +537,7 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
     }
   }, [reloadAfterBackendControl])
 
-  const activeAlertItems = useMemo(() => buildAlertItems({ overview, error, isLoading, authenticated: authSession.authenticated, backendStatus, updateStatus, locale }), [authSession.authenticated, backendStatus, error, isLoading, locale, overview, updateStatus])
+  const activeAlertItems = useMemo(() => buildAlertItems({ overview, pricingRecordCount: pricingRecords.length, error, isLoading, authenticated: authSession.authenticated, backendStatus, updateStatus, locale }), [authSession.authenticated, backendStatus, error, isLoading, locale, overview, pricingRecords.length, updateStatus])
   const activeAlerts = activeAlertItems.length
 
   const archivePricing = useCallback(async (id: string) => {
@@ -584,6 +615,7 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
     costLeaderboard,
     tokenLeaderboard,
     pricingRecords,
+    observedPricingCoverage,
     isLoading,
     isRefreshing,
     error,

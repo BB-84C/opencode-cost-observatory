@@ -18,6 +18,7 @@ const fileConfigSchema = z.object({
   host: z.string().trim().min(1).optional(),
   opencodeDbPath: z.string().trim().min(1).optional(),
   analyticsDbPath: z.string().trim().min(1).optional(),
+  pricingDbPath: z.string().trim().min(1).optional(),
   dashboardToken: z.string().trim().min(1).optional(),
   dashboardTokenFile: z.string().trim().min(1).optional(),
 })
@@ -27,6 +28,7 @@ const envSchema = z.object({
   HOST: z.string().trim().min(1).default("127.0.0.1"),
   OPENCODE_DB_PATH: z.string().trim().min(1).default(path.join(os.homedir(), ".local", "share", "opencode", "opencode.db")),
   ANALYTICS_DB_PATH: z.string().trim().min(1).default("./.run/analytics.db"),
+  PRICING_DB_PATH: z.string().trim().min(1).default(path.join(os.homedir(), ".local", "share", "opencode-cost-observatory", "pricing.db")),
   DASHBOARD_TOKEN: z.string().trim().min(1).optional(),
   DASHBOARD_TOKEN_FILE: z.string().trim().min(1).optional(),
 })
@@ -36,6 +38,7 @@ export type AppConfig = {
   host: string
   opencodeDbPath: string
   analyticsDbPath: string
+  pricingDbPath: string
   dashboardToken: string
   dashboardTokenFilePath?: string
 }
@@ -109,6 +112,7 @@ export function loadConfig(
     HOST: input.HOST ?? envFileConfig.HOST ?? fileConfig.host,
     OPENCODE_DB_PATH: input.OPENCODE_DB_PATH ?? envFileConfig.OPENCODE_DB_PATH ?? fileConfig.opencodeDbPath,
     ANALYTICS_DB_PATH: input.ANALYTICS_DB_PATH ?? envFileConfig.ANALYTICS_DB_PATH ?? fileConfig.analyticsDbPath,
+    PRICING_DB_PATH: input.PRICING_DB_PATH ?? envFileConfig.PRICING_DB_PATH ?? fileConfig.pricingDbPath,
     DASHBOARD_TOKEN: input.DASHBOARD_TOKEN ?? envFileConfig.DASHBOARD_TOKEN ?? fileConfig.dashboardToken,
     DASHBOARD_TOKEN_FILE: input.DASHBOARD_TOKEN_FILE ?? envFileConfig.DASHBOARD_TOKEN_FILE ?? fileConfig.dashboardTokenFile,
   })
@@ -126,6 +130,7 @@ export function loadConfig(
     host: env.HOST,
     opencodeDbPath: resolveProjectPath(env.OPENCODE_DB_PATH),
     analyticsDbPath: resolveProjectPath(env.ANALYTICS_DB_PATH),
+    pricingDbPath: resolveProjectPath(env.PRICING_DB_PATH),
     dashboardToken,
     dashboardTokenFilePath,
   }

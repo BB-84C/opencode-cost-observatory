@@ -2,9 +2,11 @@ import { Router } from "express"
 import { z } from "zod"
 
 import { createPricingRecordDraft, sanitizePricingSourceUrl, type PricingRecordDraftInput, type PricingResolverRow } from "../services/pricing-registry"
+import { tryRespondWithAnalyticsBusy } from "../services/sqlite-busy"
 import { openAnalyticsDb } from "../storage/db"
+import { openPricingDb } from "../storage/pricing-db"
 import { pricing_record, sync_state } from "../storage/schema.sql"
-import { readPricingRecords } from "../services/dashboard-analytics"
+import { readObservedPricingCoverage, readPricingRecords } from "../services/dashboard-analytics"
 
 const reasoningBillingRuleSchema = z.object({
   kind: z.enum(["per_token", "included_in_output"]),
@@ -114,8 +116,8 @@ function toDraftInput(row: PricingResolverRow): PricingRecordDraftInput {
   }
 }
 
-function readPricingRecord(databasePath: string, id: string) {
-  return readPricingRecords(databasePath).find((row) => row.id === id) ?? null
+function readPricingRecord(pricingDbPath: string, id: string) {
+  return readPricingRecords(pricingDbPath).find((row) => row.id === id) ?? null
 }
 
 function buildSupersededPricingRecordId(id: string, supersededTime: number, effectiveTime: number) {
@@ -148,8 +150,8 @@ function queuePricingRefresh(databasePath: string, now = Math.floor(Date.now() /
   }
 }
 
-function insertPricingRecord(databasePath: string, input: PricingRecordDraftInput) {
-  const db = openAnalyticsDb(databasePath)
+function insertPricingRecord(pricingDbPath: string, input: PricingRecordDraftInput) {
+  const db = openPricingDb(pricingDbPath)
 
   try {
     db.insert(pricing_record).values(createPricingRecordDraft(input)).run()
@@ -157,16 +159,16 @@ function insertPricingRecord(databasePath: string, input: PricingRecordDraftInpu
     db.sqlite.close()
   }
 
-  return readPricingRecord(databasePath, input.id)
+  return readPricingRecord(pricingDbPath, input.id)
 }
 
 function updatePricingRecord(
-  databasePath: string,
+  pricingDbPath: string,
   id: string,
   patch: z.infer<typeof pricingRecordUpdateSchema>,
   now = Math.floor(Date.now() / 1000),
 ) {
-  const existing = readPricingRecord(databasePath, id)
+  const existing = readPricingRecord(pricingDbPath, id)
 
   if (!existing) {
     return null
@@ -185,7 +187,7 @@ function updatePricingRecord(
     enabled: patch.enabled ?? true,
   })
 
-  const db = openAnalyticsDb(databasePath)
+  const db = openPricingDb(pricingDbPath)
 
   try {
     db.sqlite.exec("begin immediate")
@@ -220,26 +222,54 @@ function updatePricingRecord(
     db.sqlite.close()
   }
 
-  return readPricingRecord(databasePath, id)
+  return readPricingRecord(pricingDbPath, id)
 }
 
-export function pricingRoutes(analyticsDbPath: string) {
+export function pricingRoutes(analyticsDbPath: string, pricingDbPath: string) {
   const router = Router()
 
   router.get("/pricing/records", (_req, res) => {
-    res.json({ records: readPricingRecords(analyticsDbPath).map(toApiRecord) })
+    try {
+      res.json({ records: readPricingRecords(pricingDbPath).map(toApiRecord) })
+    } catch (error) {
+      if (tryRespondWithAnalyticsBusy(res, error)) {
+        return
+      }
+      throw error
+    }
+  })
+
+  router.get("/pricing/observed-coverage", (_req, res) => {
+    try {
+      res.json({ rows: readObservedPricingCoverage(analyticsDbPath, pricingDbPath) })
+    } catch (error) {
+      if (tryRespondWithAnalyticsBusy(res, error)) {
+        return
+      }
+      throw error
+    }
   })
 
   router.post("/pricing/refresh", (_req, res) => {
-    res.json(queuePricingRefresh(analyticsDbPath))
+    try {
+      res.json(queuePricingRefresh(analyticsDbPath))
+    } catch (error) {
+      if (tryRespondWithAnalyticsBusy(res, error)) {
+        return
+      }
+      throw error
+    }
   })
 
   router.post("/pricing/records", (req, res) => {
     try {
       const payload = pricingRecordCreateSchema.parse(req.body)
-      const record = insertPricingRecord(analyticsDbPath, payload)
+      const record = insertPricingRecord(pricingDbPath, payload)
       res.status(201).json({ record: record ? toApiRecord(record) : null })
     } catch (error) {
+      if (tryRespondWithAnalyticsBusy(res, error)) {
+        return
+      }
       res.status(400).json({ error: badRequestMessage(error) })
     }
   })
@@ -247,7 +277,7 @@ export function pricingRoutes(analyticsDbPath: string) {
   router.put("/pricing/records/:id", (req, res) => {
     try {
       const payload = pricingRecordUpdateSchema.parse(req.body)
-      const record = updatePricingRecord(analyticsDbPath, req.params.id, payload)
+      const record = updatePricingRecord(pricingDbPath, req.params.id, payload)
 
       if (!record) {
         res.status(404).json({ error: "pricing_record_not_found" })
@@ -256,30 +286,48 @@ export function pricingRoutes(analyticsDbPath: string) {
 
       res.json({ record: toApiRecord(record) })
     } catch (error) {
+      if (tryRespondWithAnalyticsBusy(res, error)) {
+        return
+      }
       res.status(400).json({ error: badRequestMessage(error) })
     }
   })
 
   router.delete("/pricing/records/:id", (req, res) => {
-    const existing = readPricingRecord(analyticsDbPath, req.params.id)
+    let existing
+    try {
+      existing = readPricingRecord(pricingDbPath, req.params.id)
+    } catch (error) {
+      if (tryRespondWithAnalyticsBusy(res, error)) {
+        return
+      }
+      throw error
+    }
 
     if (!existing) {
       res.status(404).json({ error: "pricing_record_not_found" })
       return
     }
 
-    const db = openAnalyticsDb(analyticsDbPath)
     const now = Math.floor(Date.now() / 1000)
 
     try {
-      db.sqlite.prepare(`
-        update pricing_record
-        set enabled = 0,
-            superseded_time = coalesce(superseded_time, ?)
-        where id = ?
-      `).run(now, req.params.id)
-    } finally {
-      db.sqlite.close()
+      const db = openPricingDb(pricingDbPath)
+      try {
+        db.sqlite.prepare(`
+          update pricing_record
+          set enabled = 0,
+              superseded_time = coalesce(superseded_time, ?)
+          where id = ?
+        `).run(now, req.params.id)
+      } finally {
+        db.sqlite.close()
+      }
+    } catch (error) {
+      if (tryRespondWithAnalyticsBusy(res, error)) {
+        return
+      }
+      throw error
     }
 
     res.json({ deleted: true, id: req.params.id, tombstoned: true })

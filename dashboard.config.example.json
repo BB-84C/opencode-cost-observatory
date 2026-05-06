@@ -3,5 +3,6 @@
   "port": 41777,
   "opencodeDbPath": "<path-to-opencode-db>",
   "analyticsDbPath": "./.run/analytics.db",
+  "pricingDbPath": "C:/Users/<your-user>/.local/share/opencode-cost-observatory/pricing.db",
   "dashboardTokenFile": "./.run/dashboard.token"
 }

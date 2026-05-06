@@ -1,4 +1,5 @@
 import { windowSelectionToQuery, type DashboardWindowSelection } from "../lib/windowSelection"
+import { DashboardApiError } from "../lib/dashboard-api-error"
 
 export type OverviewResponse = {
   lifetimeTokens: number
@@ -182,6 +183,32 @@ export type PricingRecordsResponse = {
   records: PricingRecordResponse[]
 }
 
+export type ObservedPricingCoverageRow = {
+  observedProviderId: string
+  observedModelId: string
+  canonicalRecordId: string | null
+  canonicalVendor: string | null
+  canonicalModel: string | null
+  vendorModelId: string | null
+  sourceType: "manual" | "official" | "openrouter" | "websearch" | null
+  sourceUrl: string | null
+  confidence: string | null
+  inputPrice: number | null
+  outputPrice: number | null
+  reasoningPrice: number | null
+  cacheReadPrice: number | null
+  cacheWritePrice: number | null
+  messageCount: number
+  totalTokens: number
+  firstSeen: number
+  lastSeen: number
+  resolutionStatus: "priced" | "missing"
+}
+
+export type ObservedPricingCoverageResponse = {
+  rows: ObservedPricingCoverageRow[]
+}
+
 export type PricingMutationResponse = {
   record?: PricingRecordResponse | null
   deleted?: boolean
@@ -201,11 +228,23 @@ async function readJson<T>(input: RequestInfo | URL, init?: RequestInit) {
     },
   })
 
-  if (!response.ok) {
-    throw new Error(`dashboard_request_failed:${response.status}`)
+  let payload: unknown
+  try {
+    payload = await response.json()
+  } catch (error) {
+    if (response.ok) {
+      throw error
+    }
+    payload = null
   }
 
-  return await response.json() as T
+  if (!response.ok) {
+    const code = payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string" ? payload.error : null
+    const retryable = payload && typeof payload === "object" && "retryable" in payload ? payload.retryable === true : false
+    throw new DashboardApiError(response.status, code, retryable, payload)
+  }
+
+  return payload as T
 }
 
 export async function fetchOverview(window: DashboardWindow = { mode: "preset", preset: "30d" }) {
@@ -280,6 +319,10 @@ export async function fetchTokenLeaderboard(limit = 5) {
 
 export async function fetchPricingRecords() {
   return await readJson<PricingRecordsResponse>("/api/pricing/records")
+}
+
+export async function fetchObservedPricingCoverage() {
+  return await readJson<ObservedPricingCoverageResponse>("/api/pricing/observed-coverage")
 }
 
 export async function refreshPricingRecords() {

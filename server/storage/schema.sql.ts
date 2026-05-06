@@ -68,14 +68,24 @@ export const pricing_record = sqliteTable(
   ],
 )
 
-export const pricing_source_event = sqliteTable("pricing_source_event", {
-  id: text().primaryKey(),
-  pricing_record_id: text().notNull(),
-  source_type: text().notNull(),
-  source_url: text().notNull(),
-  observed_time: integer().notNull(),
-  payload_json: text(),
-})
+export const pricing_source_event = sqliteTable(
+  "pricing_source_event",
+  {
+    id: text().primaryKey(),
+    pricing_record_id: text().notNull(),
+    source_type: text().notNull(),
+    source_url: text().notNull(),
+    observed_time: integer().notNull(),
+    payload_json: text(),
+  },
+  (table) => [
+    check(
+      "pricing_source_event_source_type_valid",
+      sql`(${table.source_type} = 'manual' or ${table.source_type} = 'official' or ${table.source_type} = 'openrouter' or ${table.source_type} = 'websearch')`,
+    ),
+    check("pricing_source_event_source_url_non_blank", sql`length(trim(${table.source_url})) > 0`),
+  ],
+)
 
 export const analyticsBootstrapSql = `
 create table if not exists sync_state (
@@ -107,7 +117,9 @@ create table if not exists message_usage_fact (
   cache_write_tokens integer not null,
   total_tokens integer not null
 );
+`
 
+export const pricingBootstrapSql = `
 create table if not exists pricing_record (
   id text primary key,
   canonical_vendor text not null,
@@ -139,6 +151,8 @@ create table if not exists pricing_source_event (
   source_type text not null,
   source_url text not null,
   observed_time integer not null,
-  payload_json text
+  payload_json text,
+  constraint pricing_source_event_source_type_valid check(source_type = 'manual' or source_type = 'official' or source_type = 'openrouter' or source_type = 'websearch'),
+  constraint pricing_source_event_source_url_non_blank check(length(trim(source_url)) > 0)
 );
 `

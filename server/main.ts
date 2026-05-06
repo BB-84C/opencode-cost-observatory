@@ -10,12 +10,18 @@ import { overviewRoutes } from "./routes/overview"
 import { pricingRoutes } from "./routes/pricing"
 import { seriesRoutes } from "./routes/series"
 import { syncRoutes } from "./routes/sync"
+import { queueColdStartAnalyticsRefresh } from "./services/cold-start-sync"
+import { ensurePricingRegistryReady } from "./services/pricing-recovery"
+import { bootstrapAnalyticsDb } from "./storage/db"
 
 function formatHttpHost(host: string) {
   return host.includes(":") ? `[${host}]` : host
 }
 
 export function createServer(_config: AppConfig = loadConfig()) {
+  bootstrapAnalyticsDb(_config.analyticsDbPath)
+  ensurePricingRegistryReady(_config.analyticsDbPath, _config.pricingDbPath)
+
   const app = express()
   app.disable("x-powered-by")
   app.use(express.json())
@@ -25,15 +31,15 @@ export function createServer(_config: AppConfig = loadConfig()) {
   app.use(diagnosticsRoutes(_config.analyticsDbPath, _config.dashboardToken))
   app.use("/api", diagnosticsRoutes(_config.analyticsDbPath, _config.dashboardToken))
   app.use(requireDashboardToken(_config.dashboardToken))
-  app.use(overviewRoutes(_config.analyticsDbPath))
-  app.use(seriesRoutes(_config.analyticsDbPath))
-  app.use(leaderboardsRoutes(_config.analyticsDbPath))
-  app.use(pricingRoutes(_config.analyticsDbPath))
+  app.use(overviewRoutes(_config.analyticsDbPath, _config.pricingDbPath))
+  app.use(seriesRoutes(_config.analyticsDbPath, _config.pricingDbPath))
+  app.use(leaderboardsRoutes(_config.analyticsDbPath, _config.pricingDbPath))
+  app.use(pricingRoutes(_config.analyticsDbPath, _config.pricingDbPath))
   app.use(syncRoutes(_config.analyticsDbPath, _config.opencodeDbPath))
-  app.use("/api", overviewRoutes(_config.analyticsDbPath))
-  app.use("/api", seriesRoutes(_config.analyticsDbPath))
-  app.use("/api", leaderboardsRoutes(_config.analyticsDbPath))
-  app.use("/api", pricingRoutes(_config.analyticsDbPath))
+  app.use("/api", overviewRoutes(_config.analyticsDbPath, _config.pricingDbPath))
+  app.use("/api", seriesRoutes(_config.analyticsDbPath, _config.pricingDbPath))
+  app.use("/api", leaderboardsRoutes(_config.analyticsDbPath, _config.pricingDbPath))
+  app.use("/api", pricingRoutes(_config.analyticsDbPath, _config.pricingDbPath))
   app.use("/api", syncRoutes(_config.analyticsDbPath, _config.opencodeDbPath))
   return app
 }
@@ -45,6 +51,11 @@ export async function startServer(config: AppConfig = loadConfig()) {
     const server = app.listen(config.port, config.host, () => {
       console.log(`observatory backend listening on http://${formatHttpHost(config.host)}:${config.port}`)
       console.log("vite client is separate; run npm run dev for the browser scaffold")
+      try {
+        queueColdStartAnalyticsRefresh(config.analyticsDbPath, config.opencodeDbPath)
+      } catch (error) {
+        console.warn("cold-start analytics refresh was not queued", error)
+      }
       resolve(server)
     })
 

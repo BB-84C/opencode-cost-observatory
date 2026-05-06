@@ -1,6 +1,7 @@
 import { Router } from "express"
 
 import { buildCostSessionLeaderboard, buildTokenSessionLeaderboard } from "../services/dashboard-analytics"
+import { tryRespondWithAnalyticsBusy } from "../services/sqlite-busy"
 
 function parseLimit(raw: unknown) {
   if (raw == null || raw === "") {
@@ -15,7 +16,7 @@ function parseLimit(raw: unknown) {
   return Number.isInteger(limit) && limit > 0 ? limit : Number.NaN
 }
 
-export function leaderboardsRoutes(analyticsDbPath: string) {
+export function leaderboardsRoutes(analyticsDbPath: string, pricingDbPath: string) {
   const router = Router()
 
   router.get("/leaderboards/token-sessions", (req, res) => {
@@ -25,7 +26,14 @@ export function leaderboardsRoutes(analyticsDbPath: string) {
       return
     }
 
-    res.json(buildTokenSessionLeaderboard(analyticsDbPath, limit ?? undefined))
+    try {
+      res.json(buildTokenSessionLeaderboard(analyticsDbPath, pricingDbPath, limit ?? undefined))
+    } catch (error) {
+      if (tryRespondWithAnalyticsBusy(res, error)) {
+        return
+      }
+      throw error
+    }
   })
 
   router.get("/leaderboards/cost-sessions", (req, res) => {
@@ -35,7 +43,14 @@ export function leaderboardsRoutes(analyticsDbPath: string) {
       return
     }
 
-    res.json(buildCostSessionLeaderboard(analyticsDbPath, limit ?? undefined))
+    try {
+      res.json(buildCostSessionLeaderboard(analyticsDbPath, pricingDbPath, limit ?? undefined))
+    } catch (error) {
+      if (tryRespondWithAnalyticsBusy(res, error)) {
+        return
+      }
+      throw error
+    }
   })
 
   router.get("/leaderboards/expensive-sessions", (req, res) => {
@@ -45,8 +60,15 @@ export function leaderboardsRoutes(analyticsDbPath: string) {
       return
     }
 
-    const result = buildCostSessionLeaderboard(analyticsDbPath, limit ?? undefined)
-    res.json({ ...result, rows: result.sessions })
+    try {
+      const result = buildCostSessionLeaderboard(analyticsDbPath, pricingDbPath, limit ?? undefined)
+      res.json({ ...result, rows: result.sessions })
+    } catch (error) {
+      if (tryRespondWithAnalyticsBusy(res, error)) {
+        return
+      }
+      throw error
+    }
   })
 
   return router

@@ -146,6 +146,7 @@ export default function DashboardPage() {
     costLeaderboard,
     tokenLeaderboard,
     pricingRecords,
+    observedPricingCoverage,
     activeAlerts,
     activeAlertItems,
     isLoading,
@@ -356,6 +357,7 @@ export default function DashboardPage() {
             costSessions={costLeaderboard}
             tokenSessions={tokenLeaderboard}
             pricingRecords={pricingRecords}
+            observedPricingCoverage={observedPricingCoverage}
             points={series.points}
             locale={locale}
             onArchivePricing={archivePricing}
@@ -368,6 +370,7 @@ export default function DashboardPage() {
               expensiveSessions: copy.expensiveSessions,
               tokenSessions: copy.tokenSessions,
               pricingDrilldown: copy.pricingDrilldown,
+              observedProviderCoverage: language === "zh" ? "观测供应商覆盖" : "Observed Provider Coverage",
               windowBreakdown: copy.selectedWindow,
               pricingFreshness: copy.freshness,
               title: copy.analysisPanels,

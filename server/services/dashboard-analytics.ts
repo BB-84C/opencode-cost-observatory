@@ -4,6 +4,8 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { calculateUsageCost } from "./cost-engine"
+import { buildObservedPricingCoverageRows } from "./observed-pricing-coverage"
+import { normalizePricingModelKey, rowMatchesPricingModelKey } from "./pricing-identity"
 import { resolveCanonicalPrice, type PricingResolverRow } from "./pricing-registry"
 import {
   RAW_OPENCODE_MESSAGES_CURSOR_KEY,
@@ -15,7 +17,8 @@ import {
 } from "./raw-opencode"
 import { rollupSessionTree } from "./session-rollup"
 import type { ParsedDashboardWindow } from "./window-range"
-import { openAnalyticsDb, openRawOpencodeDb } from "../storage/db"
+import { openAnalyticsDb, openAnalyticsReadonlyDb, openRawOpencodeDb } from "../storage/db"
+import { openPricingReadonlyDb } from "../storage/pricing-db"
 
 type UsageFactRow = {
   message_id: string
@@ -214,7 +217,7 @@ function shouldMarkInterrupted(state: Record<string, string>) {
 }
 
 function readSyncStateRaw(databasePath: string) {
-  const db = openAnalyticsDb(databasePath)
+  const db = openAnalyticsReadonlyDb(databasePath)
 
   try {
     const rows = db.sqlite.prepare(`
@@ -292,65 +295,21 @@ function mergeUsdTotals(base: number | null, next: number | null) {
   return base + next
 }
 
-function normalizeVendorModelId(value: string) {
-  return value.trim().toLowerCase()
-}
-
 function normalizeAnalyticsUnixSeconds(value: number) {
   return value > 10_000_000_000 ? Math.floor(value / 1000) : value
 }
 
-function parseVendorScopedModelId(value: string) {
-  const normalized = normalizeVendorModelId(value)
-  const slashIndex = normalized.indexOf("/")
-
-  if (slashIndex <= 0 || slashIndex === normalized.length - 1) {
-    return null
-  }
-
-  return {
-    vendor: normalized.slice(0, slashIndex),
-    model: normalized.slice(slashIndex + 1),
-  }
-}
-
 function resolvePriceForUsage(rows: PricingResolverRow[], usage: UsageFactRow) {
-  const provider = usage.provider_id.trim().toLowerCase()
-  const model = usage.model_id.trim().toLowerCase()
+  const modelKey = normalizePricingModelKey(usage.model_id)
   const usageTime = normalizeAnalyticsUnixSeconds(usage.time_created)
-
-  const routedModel = parseVendorScopedModelId(model)
-  const candidateVendors = new Set([provider])
-  const candidateModels = new Set([model])
-  const candidateVendorModelIds = new Set([model, `${provider}/${model}`])
-
-  if (routedModel) {
-    candidateVendors.add(routedModel.vendor)
-    candidateModels.add(routedModel.model)
-    candidateVendorModelIds.add(`${routedModel.vendor}/${routedModel.model}`)
-  }
-
-  const providerScoped = rows.filter((row) => {
-    const canonicalVendor = row.canonical_vendor.trim().toLowerCase()
-
-    if (!candidateVendors.has(canonicalVendor)) {
-      return false
-    }
-
-    return candidateVendorModelIds.has(normalizeVendorModelId(row.vendor_model_id))
-      || candidateModels.has(row.canonical_model.trim().toLowerCase())
-  })
-
-  if (providerScoped.length > 0) {
-    return resolveCanonicalPrice(providerScoped, usageTime)
-  }
-
-  return null
+  const candidates = rows.filter((row) => rowMatchesPricingModelKey(modelKey, row))
+  return candidates.length > 0 ? resolveCanonicalPrice(candidates, usageTime) : null
 }
 
 function addPricingCoverageGap(gaps: Map<string, PricingCoverageGap>, usage: UsageFactRow) {
   const providerId = usage.provider_id
   const modelId = usage.model_id
+  const modelKey = normalizePricingModelKey(modelId)
   const usageTime = normalizeAnalyticsUnixSeconds(usage.time_created)
   const key = `${providerId}\u0000${modelId}`
   const existing = gaps.get(key)
@@ -371,7 +330,7 @@ function addPricingCoverageGap(gaps: Map<string, PricingCoverageGap>, usage: Usa
     firstSeen: usageTime,
     lastSeen: usageTime,
     reason: "no_matching_pricing_record",
-    hint: `Add an enabled pricing row whose vendor/model exactly matches ${providerId} / ${modelId}.`,
+    hint: `Add an enabled pricing row for canonical model ${modelKey}. Provider wrappers such as ${providerId} are treated as transport layers, not pricing identity.`,
   })
 }
 
@@ -403,7 +362,7 @@ function calculateUsageSpend(priceRows: PricingResolverRow[], usage: UsageFactRo
 }
 
 function readUsageFacts(databasePath: string) {
-  const db = openAnalyticsDb(databasePath)
+  const db = openAnalyticsReadonlyDb(databasePath)
 
   try {
     return db.sqlite.prepare(`
@@ -418,7 +377,7 @@ function readUsageFacts(databasePath: string) {
 }
 
 function readSessionTree(databasePath: string) {
-  const db = openAnalyticsDb(databasePath)
+  const db = openAnalyticsReadonlyDb(databasePath)
 
   try {
     return db.sqlite.prepare(`
@@ -431,8 +390,8 @@ function readSessionTree(databasePath: string) {
   }
 }
 
-export function readPricingRecords(databasePath: string) {
-  const db = openAnalyticsDb(databasePath)
+export function readPricingRecords(pricingDbPath: string) {
+  const db = openPricingReadonlyDb(pricingDbPath)
 
   try {
     return db.sqlite.prepare(`
@@ -446,6 +405,14 @@ export function readPricingRecords(databasePath: string) {
   } finally {
     db.sqlite.close()
   }
+}
+
+export function readObservedPricingCoverage(analyticsDbPath: string, pricingDbPath: string, asOfTime = Math.floor(Date.now() / 1000)) {
+  return buildObservedPricingCoverageRows({
+    usageFacts: readUsageFacts(analyticsDbPath),
+    pricingRows: readPricingRecords(pricingDbPath),
+    asOfTime,
+  })
 }
 
 export function readSyncState(databasePath: string) {
@@ -643,10 +610,15 @@ function getWindowBounds(window: DashboardWindowRange | string | undefined, now:
   }
 }
 
-export function buildOverview(databasePath: string, now = Math.floor(Date.now() / 1000), window: string | ParsedDashboardWindow | undefined = "30d") {
-  const usageRows = readUsageFacts(databasePath)
-  const priceRows = readPricingRecords(databasePath)
-  const syncState = readSyncState(databasePath)
+export function buildOverview(
+  analyticsDbPath: string,
+  pricingDbPath: string,
+  now = Math.floor(Date.now() / 1000),
+  window: string | ParsedDashboardWindow | undefined = "30d",
+) {
+  const usageRows = readUsageFacts(analyticsDbPath)
+  const priceRows = readPricingRecords(pricingDbPath)
+  const syncState = readSyncStateRaw(analyticsDbPath)
   const windowBounds = isParsedDashboardWindow(window)
     ? getWindowBounds(window, now)
     : {
@@ -741,11 +713,12 @@ function getBucketStart(unixSeconds: number, granularity: SeriesGranularity) {
 }
 
 export function buildSeries(
-  databasePath: string,
+  analyticsDbPath: string,
+  pricingDbPath: string,
   options: { granularity?: SeriesGranularity; metrics?: SeriesMetric[]; window?: DashboardWindowRange; now?: number } = {},
 ) {
-  const usageRows = readUsageFacts(databasePath)
-  const priceRows = readPricingRecords(databasePath)
+  const usageRows = readUsageFacts(analyticsDbPath)
+  const priceRows = readPricingRecords(pricingDbPath)
   const granularity = options.granularity ?? "daily"
   const now = options.now ?? Math.floor(Date.now() / 1000)
   const windowBounds = getWindowBounds(options.window, now, "30d")
@@ -865,10 +838,10 @@ export function buildSeries(
   }
 }
 
-function buildSessionLeaderboardRows(databasePath: string) {
-  const sessions = readSessionTree(databasePath)
-  const priceRows = readPricingRecords(databasePath)
-  const usageRows = readUsageFacts(databasePath)
+function buildSessionLeaderboardRows(analyticsDbPath: string, pricingDbPath: string) {
+  const sessions = readSessionTree(analyticsDbPath)
+  const priceRows = readPricingRecords(pricingDbPath)
+  const usageRows = readUsageFacts(analyticsDbPath)
   const sessionMetaById = new Map(sessions.map((session) => [session.session_id, session]))
   const usageBySession = new Map<string, { sessionId: string; totalTokens: number; totalCostUsd: number | null }>()
 
@@ -919,8 +892,8 @@ function applyLeaderboardLimit<T>(rows: T[], limit?: number) {
   return rows.slice(0, limit)
 }
 
-export function buildCostSessionLeaderboard(databasePath: string, limit?: number) {
-  const sessions = buildSessionLeaderboardRows(databasePath)
+export function buildCostSessionLeaderboard(analyticsDbPath: string, pricingDbPath: string, limit?: number) {
+  const sessions = buildSessionLeaderboardRows(analyticsDbPath, pricingDbPath)
     .sort((a, b) => (b.totalCostUsd ?? -1) - (a.totalCostUsd ?? -1) || b.totalTokens - a.totalTokens || a.sessionId.localeCompare(b.sessionId))
 
   return {
@@ -928,8 +901,8 @@ export function buildCostSessionLeaderboard(databasePath: string, limit?: number
   }
 }
 
-export function buildTokenSessionLeaderboard(databasePath: string, limit?: number) {
-  const sessions = buildSessionLeaderboardRows(databasePath)
+export function buildTokenSessionLeaderboard(analyticsDbPath: string, pricingDbPath: string, limit?: number) {
+  const sessions = buildSessionLeaderboardRows(analyticsDbPath, pricingDbPath)
     .sort((a, b) => b.totalTokens - a.totalTokens || a.sessionId.localeCompare(b.sessionId))
 
   return {
@@ -1009,6 +982,10 @@ export function getSyncRefreshLifecycle(databasePath: string) {
   }
 
   return buildSyncLifecycle(readSyncState(databasePath))
+}
+
+export function hasActiveSyncRefresh(databasePath: string) {
+  return activeSyncJobs.has(databasePath)
 }
 
 export function queueSyncRefresh(databasePath: string, rawDatabasePath: string, now = Math.floor(Date.now() / 1000)) {

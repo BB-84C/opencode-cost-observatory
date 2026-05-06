@@ -32,6 +32,21 @@ Create runtime config with either of these files:
 
 After copying, edit the file so `OPENCODE_DB_PATH` / `opencodeDbPath` point at your local OpenCode SQLite database.
 
+The observatory uses two local stores:
+
+- `ANALYTICS_DB_PATH` / `analyticsDbPath` for rebuildable analytics cache data
+- `PRICING_DB_PATH` / `pricingDbPath` for durable pricing registry data
+
+If the analytics DB is deleted, usage/session rollups can be rebuilt from the raw OpenCode DB. If the pricing DB is deleted, current pricing rows must be restored or re-seeded.
+
+Use an absolute path for `PRICING_DB_PATH` / `pricingDbPath` when overriding the default. Values copied from `.env` or `dashboard.config.json` are not shell-expanded, so write `C:/Users/<your-user>/.local/share/opencode-cost-observatory/pricing.db` instead of `%USERPROFILE%/...`.
+
+Pricing recovery precedence at backend startup is:
+
+1. keep an existing durable pricing registry when active rows are present
+2. otherwise migrate active legacy pricing rows from the analytics database
+3. otherwise insert the built-in current effective pricing seed rows
+
 Config precedence is:
 
 1. process environment variables
@@ -109,6 +124,7 @@ That launcher is outside the managed surface of this repo.
 
 ## Privacy and local data
 
-- `.run/` contains local runtime state, logs, auth tokens, and analytics data.
+- `.run/` contains local runtime state, logs, auth tokens, and the rebuildable analytics cache.
+- The durable pricing registry lives outside `.run/` by default.
 - Do not commit `.run/`, local databases, or local tokens.
 - Browser auth is localhost-only and token-based.
