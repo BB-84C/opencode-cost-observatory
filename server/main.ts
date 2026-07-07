@@ -3,17 +3,20 @@ import { fileURLToPath } from "node:url"
 import express from "express"
 import { authRoutes, requireDashboardToken } from "./auth"
 import { AppConfig, loadConfig } from "./config"
+import { requireSession } from "./middleware/passkey-session"
 import { diagnosticsRoutes } from "./routes/diagnostics"
 import { healthRoutes } from "./routes/health"
 import { ingestRoutes } from "./routes/ingest"
 import { leaderboardsRoutes } from "./routes/leaderboards"
 import { overviewRoutes } from "./routes/overview"
+import { passkeyAuthRoutes } from "./routes/passkey-auth"
 import { pricingRoutes } from "./routes/pricing"
 import { publicBadgeRoutes } from "./routes/public-badge"
 import { publicHeatmapRoutes } from "./routes/public-heatmap"
 import { seriesRoutes } from "./routes/series"
 import { syncRoutes } from "./routes/sync"
 import { queueColdStartAnalyticsRefresh } from "./services/cold-start-sync"
+import { createPasskeyService } from "./services/passkey-service"
 import { ensurePricingRegistryReady } from "./services/pricing-recovery"
 import { bootstrapAnalyticsDb } from "./storage/db"
 
@@ -35,12 +38,27 @@ export function createServer(_config: AppConfig = loadConfig()) {
   app.use("/api", publicHeatmapRoutes(_config.analyticsDbPath))
 
   if (_config.bb84VpsMode === "ingest") {
+    const passkeyService = createPasskeyService({
+      authDbPath: _config.authDbPath,
+      authEncryptionKey: _config.authEncryptionKey!,
+      bootstrapToken: _config.bootstrapToken!,
+      sessionTtlSeconds: _config.authSessionTtlSeconds,
+    })
     app.use(ingestRoutes(_config.analyticsDbPath, _config.ingestToken!))
+    app.use("/api", ingestRoutes(_config.analyticsDbPath, _config.ingestToken!))
+    app.use(passkeyAuthRoutes(passkeyService, {
+      adminName: _config.adminName,
+      rpId: _config.webAuthnRpId,
+      rpName: _config.webAuthnRpName,
+      origin: _config.webAuthnOrigin,
+      sessionTtlSeconds: _config.authSessionTtlSeconds,
+    }))
+    app.use(express.static(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "public"), { index: false }))
+    app.use(requireSession(passkeyService, { adminName: _config.adminName }))
     app.use(overviewRoutes(_config.analyticsDbPath, _config.pricingDbPath))
     app.use(seriesRoutes(_config.analyticsDbPath, _config.pricingDbPath))
     app.use(leaderboardsRoutes(_config.analyticsDbPath, _config.pricingDbPath))
     app.use(pricingRoutes(_config.analyticsDbPath, _config.pricingDbPath))
-    app.use("/api", ingestRoutes(_config.analyticsDbPath, _config.ingestToken!))
     app.use("/api", overviewRoutes(_config.analyticsDbPath, _config.pricingDbPath))
     app.use("/api", seriesRoutes(_config.analyticsDbPath, _config.pricingDbPath))
     app.use("/api", leaderboardsRoutes(_config.analyticsDbPath, _config.pricingDbPath))
@@ -48,11 +66,11 @@ export function createServer(_config: AppConfig = loadConfig()) {
     return app
   }
 
-  app.use(authRoutes(_config.dashboardToken, { localAuthFilePath: _config.dashboardTokenFilePath }))
-  app.use("/api", authRoutes(_config.dashboardToken, { localAuthFilePath: _config.dashboardTokenFilePath }))
-  app.use(diagnosticsRoutes(_config.analyticsDbPath, _config.dashboardToken))
-  app.use("/api", diagnosticsRoutes(_config.analyticsDbPath, _config.dashboardToken))
-  app.use(requireDashboardToken(_config.dashboardToken))
+  app.use(authRoutes(_config.dashboardToken!, { localAuthFilePath: _config.dashboardTokenFilePath }))
+  app.use("/api", authRoutes(_config.dashboardToken!, { localAuthFilePath: _config.dashboardTokenFilePath }))
+  app.use(diagnosticsRoutes(_config.analyticsDbPath, _config.dashboardToken!))
+  app.use("/api", diagnosticsRoutes(_config.analyticsDbPath, _config.dashboardToken!))
+  app.use(requireDashboardToken(_config.dashboardToken!))
   app.use(overviewRoutes(_config.analyticsDbPath, _config.pricingDbPath))
   app.use(seriesRoutes(_config.analyticsDbPath, _config.pricingDbPath))
   app.use(leaderboardsRoutes(_config.analyticsDbPath, _config.pricingDbPath))
