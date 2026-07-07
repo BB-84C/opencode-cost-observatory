@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BB84 OpenCode Observatory Login</title>
+    <style>
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f6f8fa; color: #111827; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      main { width: min(420px, calc(100vw - 32px)); padding: 28px; border: 1px solid #d0d7de; border-radius: 14px; background: white; box-shadow: 0 18px 40px rgba(31, 35, 40, 0.08); }
+      h1 { margin: 0 0 8px; font-size: 22px; }
+      p { color: #57606a; line-height: 1.5; }
+      button { width: 100%; border: 0; border-radius: 10px; padding: 12px 16px; background: #0969da; color: white; font-weight: 700; cursor: pointer; }
+      #status { min-height: 20px; margin-top: 14px; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>BB84 OpenCode Observatory</h1>
+      <p>Sign in with your administrator passkey.</p>
+      <button id="signin">Sign in with passkey</button>
+      <div id="status" role="status"></div>
+    </main>
+    <script src="https://unpkg.com/@simplewebauthn/browser@10/dist/bundle/index.min.js"></script>
+    <script>
+      const status = document.querySelector('#status')
+      document.querySelector('#signin').addEventListener('click', async () => {
+        try {
+          status.textContent = 'Starting passkey sign-in...'
+          const begin = await fetch('/auth/passkey/auth/begin', { method: 'POST' })
+          if (!begin.ok) throw new Error('Unable to start sign-in')
+          const { authOptions, challengeKey } = await begin.json()
+          const authenticationResponse = await SimpleWebAuthnBrowser.startAuthentication(authOptions)
+          const complete = await fetch('/auth/passkey/auth/complete', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ challengeKey, authenticationResponse })
+          })
+          if (!complete.ok) throw new Error('Passkey verification failed')
+          window.location.href = '/'
+        } catch (error) {
+          status.textContent = error.message || 'Sign-in failed'
+        }
+      })
+    </script>
+  </body>
+</html>
