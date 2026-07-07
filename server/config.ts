@@ -33,6 +33,14 @@ const envSchema = z.object({
   DASHBOARD_TOKEN_FILE: z.string().trim().min(1).optional(),
   BB84_VPS_MODE: z.enum(["local", "ingest"]).default("local"),
   INGEST_TOKEN: z.string().trim().min(1).optional(),
+  BOOTSTRAP_TOKEN: z.string().trim().min(1).optional(),
+  WEBAUTHN_RP_ID: z.string().trim().min(1).default("tokenobs.bb84.ai"),
+  WEBAUTHN_RP_NAME: z.string().trim().min(1).default("BB84 OpenCode Observatory"),
+  WEBAUTHN_ORIGIN: z.string().trim().url().default("https://tokenobs.bb84.ai"),
+  AUTH_SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(604_800),
+  AUTH_DB_PATH: z.string().trim().min(1).default("./.run/auth.db"),
+  ADMIN_NAME: z.string().trim().min(1).default("admin"),
+  AUTH_ENCRYPTION_KEY: z.string().min(32).optional(),
 })
 
 export type AppConfig = {
@@ -41,10 +49,18 @@ export type AppConfig = {
   opencodeDbPath: string
   analyticsDbPath: string
   pricingDbPath: string
-  dashboardToken: string
+  dashboardToken?: string
   dashboardTokenFilePath?: string
   bb84VpsMode: "local" | "ingest"
   ingestToken?: string
+  bootstrapToken?: string
+  webAuthnRpId: string
+  webAuthnRpName: string
+  webAuthnOrigin: string
+  authSessionTtlSeconds: number
+  authDbPath: string
+  adminName: string
+  authEncryptionKey?: string
 }
 
 function resolveProjectPath(target: string) {
@@ -121,18 +137,34 @@ export function loadConfig(
     DASHBOARD_TOKEN_FILE: input.DASHBOARD_TOKEN_FILE ?? envFileConfig.DASHBOARD_TOKEN_FILE ?? fileConfig.dashboardTokenFile,
     BB84_VPS_MODE: input.BB84_VPS_MODE ?? envFileConfig.BB84_VPS_MODE,
     INGEST_TOKEN: input.INGEST_TOKEN ?? envFileConfig.INGEST_TOKEN,
+    BOOTSTRAP_TOKEN: input.BOOTSTRAP_TOKEN ?? envFileConfig.BOOTSTRAP_TOKEN,
+    WEBAUTHN_RP_ID: input.WEBAUTHN_RP_ID ?? envFileConfig.WEBAUTHN_RP_ID,
+    WEBAUTHN_RP_NAME: input.WEBAUTHN_RP_NAME ?? envFileConfig.WEBAUTHN_RP_NAME,
+    WEBAUTHN_ORIGIN: input.WEBAUTHN_ORIGIN ?? envFileConfig.WEBAUTHN_ORIGIN,
+    AUTH_SESSION_TTL_SECONDS: input.AUTH_SESSION_TTL_SECONDS ?? envFileConfig.AUTH_SESSION_TTL_SECONDS,
+    AUTH_DB_PATH: input.AUTH_DB_PATH ?? envFileConfig.AUTH_DB_PATH,
+    ADMIN_NAME: input.ADMIN_NAME ?? envFileConfig.ADMIN_NAME,
+    AUTH_ENCRYPTION_KEY: input.AUTH_ENCRYPTION_KEY ?? envFileConfig.AUTH_ENCRYPTION_KEY,
   })
 
   const dashboardTokenFilePath = env.DASHBOARD_TOKEN_FILE ? resolveProjectPath(env.DASHBOARD_TOKEN_FILE) : undefined
   const dashboardToken = env.DASHBOARD_TOKEN
     ?? (dashboardTokenFilePath ? readDashboardTokenFile(dashboardTokenFilePath) : undefined)
 
-  if (!dashboardToken) {
+  if (env.BB84_VPS_MODE === "local" && !dashboardToken) {
     throw new Error("DASHBOARD_TOKEN or DASHBOARD_TOKEN_FILE is required")
   }
 
   if (env.BB84_VPS_MODE === "ingest" && !env.INGEST_TOKEN) {
     throw new Error("INGEST_TOKEN is required when BB84_VPS_MODE=ingest")
+  }
+
+  if (env.BB84_VPS_MODE === "ingest" && !env.BOOTSTRAP_TOKEN) {
+    throw new Error("BOOTSTRAP_TOKEN is required when BB84_VPS_MODE=ingest")
+  }
+
+  if (env.BB84_VPS_MODE === "ingest" && !env.AUTH_ENCRYPTION_KEY) {
+    throw new Error("AUTH_ENCRYPTION_KEY is required when BB84_VPS_MODE=ingest")
   }
 
   return {
@@ -145,5 +177,13 @@ export function loadConfig(
     dashboardTokenFilePath,
     bb84VpsMode: env.BB84_VPS_MODE,
     ingestToken: env.INGEST_TOKEN,
+    bootstrapToken: env.BOOTSTRAP_TOKEN,
+    webAuthnRpId: env.WEBAUTHN_RP_ID,
+    webAuthnRpName: env.WEBAUTHN_RP_NAME,
+    webAuthnOrigin: env.WEBAUTHN_ORIGIN,
+    authSessionTtlSeconds: env.AUTH_SESSION_TTL_SECONDS,
+    authDbPath: resolveProjectPath(env.AUTH_DB_PATH),
+    adminName: env.ADMIN_NAME,
+    authEncryptionKey: env.AUTH_ENCRYPTION_KEY,
   }
 }
