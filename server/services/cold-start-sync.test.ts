@@ -193,6 +193,12 @@ test("startServer queues one cold-start refresh after the backend is listening",
       pricingDbPath,
       dashboardToken: "test-token",
       bb84VpsMode: "local",
+      webAuthnRpId: "tokenobs.bb84.ai",
+      webAuthnRpName: "BB84 OpenCode Observatory",
+      webAuthnOrigin: "https://tokenobs.bb84.ai",
+      authSessionTtlSeconds: 604_800,
+      authDbPath: path.join(path.dirname(analyticsDbPath), "auth.db"),
+      adminName: "admin",
     })
 
     await new Promise((resolve) => setTimeout(resolve, 25))
@@ -257,6 +263,12 @@ test("startServer rebuilds a missing analytics cache without replacing durable p
       pricingDbPath,
       dashboardToken: "test-token",
       bb84VpsMode: "local",
+      webAuthnRpId: "tokenobs.bb84.ai",
+      webAuthnRpName: "BB84 OpenCode Observatory",
+      webAuthnOrigin: "https://tokenobs.bb84.ai",
+      authSessionTtlSeconds: 604_800,
+      authDbPath: path.join(path.dirname(analyticsDbPath), "auth.db"),
+      adminName: "admin",
     })
 
     await waitForAssertion(() => {

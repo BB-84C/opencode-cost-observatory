@@ -27,11 +27,39 @@ test("loadConfig requires INGEST_TOKEN when BB84_VPS_MODE is ingest", () => {
 
 test("loadConfig accepts ingest mode when INGEST_TOKEN is present", () => {
   const config = loadConfig({
-    DASHBOARD_TOKEN: "dashboard-token",
     BB84_VPS_MODE: "ingest",
     INGEST_TOKEN: "ingest-token",
+    BOOTSTRAP_TOKEN: "a".repeat(64),
+    AUTH_ENCRYPTION_KEY: "x".repeat(32),
   }, emptyConfigFiles())
 
   assert.equal(config.bb84VpsMode, "ingest")
   assert.equal(config.ingestToken, "ingest-token")
+  assert.equal(config.dashboardToken, undefined)
+  assert.equal(config.bootstrapToken, "a".repeat(64))
+  assert.equal(config.webAuthnRpId, "tokenobs.bb84.ai")
+  assert.equal(config.webAuthnRpName, "BB84 OpenCode Observatory")
+  assert.equal(config.webAuthnOrigin, "https://tokenobs.bb84.ai")
+  assert.equal(config.authSessionTtlSeconds, 604_800)
+  assert.equal(config.adminName, "admin")
+  assert.equal(config.authEncryptionKey, "x".repeat(32))
+  assert.equal(config.authDbPath.endsWith(path.join(".run", "auth.db")), true)
+})
+
+test("loadConfig requires DASHBOARD_TOKEN only in local mode", () => {
+  assert.throws(() => loadConfig({}, emptyConfigFiles()), /DASHBOARD_TOKEN/)
+})
+
+test("loadConfig requires bootstrap and encryption config in ingest mode", () => {
+  assert.throws(() => loadConfig({
+    BB84_VPS_MODE: "ingest",
+    INGEST_TOKEN: "ingest-token",
+    AUTH_ENCRYPTION_KEY: "x".repeat(32),
+  }, emptyConfigFiles()), /BOOTSTRAP_TOKEN/)
+
+  assert.throws(() => loadConfig({
+    BB84_VPS_MODE: "ingest",
+    INGEST_TOKEN: "ingest-token",
+    BOOTSTRAP_TOKEN: "a".repeat(64),
+  }, emptyConfigFiles()), /AUTH_ENCRYPTION_KEY/)
 })

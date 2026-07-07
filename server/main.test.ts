@@ -8,6 +8,7 @@ import test from "node:test"
 
 import type { AppConfig } from "./config"
 import { createServer } from "./main"
+import { createPasskeyService } from "./services/passkey-service"
 
 function closeServer(server: Server) {
   return new Promise<void>((resolve, reject) => {
@@ -31,6 +32,14 @@ function makeConfig(mode: "local" | "ingest", root: string): AppConfig {
     dashboardToken: "dashboard-token",
     bb84VpsMode: mode,
     ingestToken: mode === "ingest" ? "ingest-token" : undefined,
+    bootstrapToken: mode === "ingest" ? "b".repeat(64) : undefined,
+    webAuthnRpId: "tokenobs.bb84.ai",
+    webAuthnRpName: "BB84 OpenCode Observatory",
+    webAuthnOrigin: "https://tokenobs.bb84.ai",
+    authSessionTtlSeconds: 604_800,
+    authDbPath: path.join(root, "auth.db"),
+    adminName: "admin",
+    authEncryptionKey: mode === "ingest" ? "k".repeat(32) : undefined,
   }
 }
 
@@ -61,11 +70,30 @@ test("createServer keeps dashboard routes token-gated in local mode and exposes 
   })
 })
 
-test("createServer mounts ingest-mode upload and dashboard read routes without local sync/auth routes", async () => {
+test("createServer mounts ingest-mode upload/public/auth routes and protects dashboard reads", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "oco-main-ingest-"))
-  await withServer(makeConfig("ingest", root), async (baseUrl) => {
+  const config = makeConfig("ingest", root)
+  await withServer(config, async (baseUrl) => {
     const overview = await fetch(`${baseUrl}/overview/lifetime`)
-    assert.equal(overview.status, 200)
+    assert.equal(overview.status, 401)
+
+    const service = createPasskeyService({
+      authDbPath: config.authDbPath,
+      authEncryptionKey: config.authEncryptionKey!,
+      bootstrapToken: config.bootstrapToken!,
+      sessionTtlSeconds: config.authSessionTtlSeconds,
+    })
+    const session = service.createSession()
+    service.close()
+
+    const authedOverview = await fetch(`${baseUrl}/api/overview/lifetime`, { headers: { authorization: `Bearer ${session.token}` } })
+    assert.equal(authedOverview.status, 200)
+
+    const badge = await fetch(`${baseUrl}/api/badge/tokens`)
+    assert.equal(badge.status, 200)
+
+    const setup = await fetch(`${baseUrl}/auth/setup/status`)
+    assert.equal(setup.status, 200)
 
     const ingest = await fetch(`${baseUrl}/api/ingest`, {
       method: "POST",
@@ -75,9 +103,12 @@ test("createServer mounts ingest-mode upload and dashboard read routes without l
     assert.equal(ingest.status, 200)
 
     const sync = await fetch(`${baseUrl}/api/sync/status`)
-    assert.equal(sync.status, 404)
+    assert.equal(sync.status, 401)
+
+    const authedSync = await fetch(`${baseUrl}/api/sync/status`, { headers: { authorization: `Bearer ${session.token}` } })
+    assert.equal(authedSync.status, 404)
 
     const auth = await fetch(`${baseUrl}/api/auth/session`)
-    assert.equal(auth.status, 404)
+    assert.equal(auth.status, 401)
   })
 })
