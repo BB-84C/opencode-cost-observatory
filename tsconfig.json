@@ -20,6 +20,7 @@
     "client/**/*.ts",
     "client/**/*.tsx",
     "server/**/*.ts",
+    "uploader/**/*.ts",
     "types/**/*.d.ts",
     "vite.config.ts",
     "drizzle.config.ts"

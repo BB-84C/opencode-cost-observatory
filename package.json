@@ -13,7 +13,7 @@
     "start": "tsx server/main.ts",
     "build": "vite build --config vite.config.ts",
     "check": "tsc --noEmit",
-    "test": "node --import tsx --test \"server/**/*.test.ts\" \"client/**/*.test.ts\"",
+    "test": "node --import tsx --test \"server/**/*.test.ts\" \"client/**/*.test.ts\" \"uploader/**/*.test.ts\"",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts"
   },
   "dependencies": {

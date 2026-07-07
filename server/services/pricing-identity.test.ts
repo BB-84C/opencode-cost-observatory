@@ -13,7 +13,7 @@ test("package test script discovers TypeScript test files by default", () => {
     scripts?: Record<string, string>
   }
 
-  assert.equal(packageJson.scripts?.test, "node --import tsx --test \"server/**/*.test.ts\" \"client/**/*.test.ts\"")
+  assert.equal(packageJson.scripts?.test, "node --import tsx --test \"server/**/*.test.ts\" \"client/**/*.test.ts\" \"uploader/**/*.test.ts\"")
 })
 
 test("normalizePricingModelKey normalizes model names without provider input", () => {
