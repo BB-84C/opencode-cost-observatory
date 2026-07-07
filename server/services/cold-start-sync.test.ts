@@ -192,6 +192,7 @@ test("startServer queues one cold-start refresh after the backend is listening",
       analyticsDbPath,
       pricingDbPath,
       dashboardToken: "test-token",
+      bb84VpsMode: "local",
     })
 
     await new Promise((resolve) => setTimeout(resolve, 25))
@@ -255,6 +256,7 @@ test("startServer rebuilds a missing analytics cache without replacing durable p
       analyticsDbPath,
       pricingDbPath,
       dashboardToken: "test-token",
+      bb84VpsMode: "local",
     })
 
     await waitForAssertion(() => {
