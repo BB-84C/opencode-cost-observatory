@@ -31,6 +31,8 @@ const envSchema = z.object({
   PRICING_DB_PATH: z.string().trim().min(1).default(path.join(os.homedir(), ".local", "share", "opencode-cost-observatory", "pricing.db")),
   DASHBOARD_TOKEN: z.string().trim().min(1).optional(),
   DASHBOARD_TOKEN_FILE: z.string().trim().min(1).optional(),
+  BB84_VPS_MODE: z.enum(["local", "ingest"]).default("local"),
+  INGEST_TOKEN: z.string().trim().min(1).optional(),
 })
 
 export type AppConfig = {
@@ -41,6 +43,8 @@ export type AppConfig = {
   pricingDbPath: string
   dashboardToken: string
   dashboardTokenFilePath?: string
+  bb84VpsMode: "local" | "ingest"
+  ingestToken?: string
 }
 
 function resolveProjectPath(target: string) {
@@ -115,6 +119,8 @@ export function loadConfig(
     PRICING_DB_PATH: input.PRICING_DB_PATH ?? envFileConfig.PRICING_DB_PATH ?? fileConfig.pricingDbPath,
     DASHBOARD_TOKEN: input.DASHBOARD_TOKEN ?? envFileConfig.DASHBOARD_TOKEN ?? fileConfig.dashboardToken,
     DASHBOARD_TOKEN_FILE: input.DASHBOARD_TOKEN_FILE ?? envFileConfig.DASHBOARD_TOKEN_FILE ?? fileConfig.dashboardTokenFile,
+    BB84_VPS_MODE: input.BB84_VPS_MODE ?? envFileConfig.BB84_VPS_MODE,
+    INGEST_TOKEN: input.INGEST_TOKEN ?? envFileConfig.INGEST_TOKEN,
   })
 
   const dashboardTokenFilePath = env.DASHBOARD_TOKEN_FILE ? resolveProjectPath(env.DASHBOARD_TOKEN_FILE) : undefined
@@ -125,6 +131,10 @@ export function loadConfig(
     throw new Error("DASHBOARD_TOKEN or DASHBOARD_TOKEN_FILE is required")
   }
 
+  if (env.BB84_VPS_MODE === "ingest" && !env.INGEST_TOKEN) {
+    throw new Error("INGEST_TOKEN is required when BB84_VPS_MODE=ingest")
+  }
+
   return {
     port: env.PORT,
     host: env.HOST,
@@ -133,5 +143,7 @@ export function loadConfig(
     pricingDbPath: resolveProjectPath(env.PRICING_DB_PATH),
     dashboardToken,
     dashboardTokenFilePath,
+    bb84VpsMode: env.BB84_VPS_MODE,
+    ingestToken: env.INGEST_TOKEN,
   }
 }
