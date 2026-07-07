@@ -10,6 +10,71 @@ if (-not (Test-Path $runDir)) {
     New-Item -ItemType Directory -Path $runDir -Force | Out-Null
 }
 
+$usageMode = if ($env:OPENCODE_USAGE_MODE) { $env:OPENCODE_USAGE_MODE } else { 'uploader' }
+
+if ($usageMode -ne 'local_dashboard') {
+    $uploaderScript = if ($env:OPENCODE_USAGE_UPLOADER_SCRIPT) { $env:OPENCODE_USAGE_UPLOADER_SCRIPT } else { Join-Path $repoRoot 'uploader.ps1' }
+    $timeoutSec = if ($env:OPENCODE_USAGE_TIMEOUT_SEC) { [int]$env:OPENCODE_USAGE_TIMEOUT_SEC } else { 30 }
+    $deadline = (Get-Date).AddSeconds($timeoutSec)
+    $uploaderLog = Join-Path $runDir 'usage-uploader-call.out.log'
+    $uploaderErr = Join-Path $runDir 'usage-uploader-call.err.log'
+
+    function Read-UploaderStatus {
+        try {
+            $raw = & pwsh -NoProfile -NoLogo -NonInteractive -File $uploaderScript status 2>$null
+            if ($LASTEXITCODE -ne 0 -or -not $raw) { return $null }
+            return ($raw | Out-String | ConvertFrom-Json -ErrorAction Stop)
+        } catch {
+            return $null
+        }
+    }
+
+    function Test-UploaderReady($Status) {
+        if (-not $Status) { return $false }
+        if ($Status.running -eq $true -and $Status.pid) { return $true }
+        if ($Status.watermark -and ([string]$Status.watermark).Trim() -ne '') { return $true }
+        return $false
+    }
+
+    $status = Read-UploaderStatus
+    if (-not ($status -and $status.running -eq $true)) {
+        Remove-Item -Path $uploaderLog, $uploaderErr -Force -ErrorAction SilentlyContinue
+        $process = Start-Process -FilePath 'pwsh' `
+            -ArgumentList @('-NoProfile', '-NoLogo', '-NonInteractive', '-File', $uploaderScript, 'start') `
+            -RedirectStandardOutput $uploaderLog `
+            -RedirectStandardError $uploaderErr `
+            -WindowStyle Hidden `
+            -PassThru `
+            -ErrorAction Stop
+        $remainingMs = [Math]::Max(1, [Math]::Ceiling(($deadline - (Get-Date)).TotalMilliseconds))
+        if (-not $process.WaitForExit([int]$remainingMs)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            [Console]::Error.WriteLine("opencode --usage failed: uploader start did not return after ${timeoutSec}s. Logs: $uploaderLog, $uploaderErr")
+            exit 1
+        }
+        if ([int]$process.ExitCode -ne 0) {
+            [Console]::Error.WriteLine("opencode --usage failed: uploader start exited $($process.ExitCode). Logs: $uploaderLog, $uploaderErr")
+            exit 1
+        }
+    }
+
+    $readyStatus = $null
+    while ((Get-Date) -lt $deadline) {
+        $readyStatus = Read-UploaderStatus
+        if (Test-UploaderReady $readyStatus) { break }
+        Start-Sleep -Milliseconds 500
+    }
+
+    if (-not (Test-UploaderReady $readyStatus)) {
+        [Console]::Error.WriteLine("opencode --usage failed: uploader not ready after ${timeoutSec}s. Logs: $uploaderLog, $uploaderErr")
+        exit 1
+    }
+
+    $watermark = if ($readyStatus.watermark) { [string]$readyStatus.watermark } else { '0' }
+    Write-Host "opencode -> BB84 VPS uploader ready. Latest watermark: $watermark"
+    exit 0
+}
+
 # --- Configuration via env (with defaults) ---
 $bootstrapScript = if ($env:OPENCODE_USAGE_BOOTSTRAP_SCRIPT) { $env:OPENCODE_USAGE_BOOTSTRAP_SCRIPT } else { Join-Path $repoRoot 'bootstrap.ps1' }
 $frontendScript  = if ($env:OPENCODE_USAGE_FRONTEND_SCRIPT)  { $env:OPENCODE_USAGE_FRONTEND_SCRIPT }  else { Join-Path $repoRoot 'scripts\spawn-frontend.ps1' }
