@@ -53,7 +53,7 @@ export function createServer(_config: AppConfig = loadConfig()) {
       origin: _config.webAuthnOrigin,
       sessionTtlSeconds: _config.authSessionTtlSeconds,
     }))
-    app.use(express.static(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "public"), { index: false }))
+    app.use(express.static(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "public"), { index: "index.html" }))
     app.use(requireSession(passkeyService, { adminName: _config.adminName }))
     app.use(overviewRoutes(_config.analyticsDbPath, _config.pricingDbPath))
     app.use(seriesRoutes(_config.analyticsDbPath, _config.pricingDbPath))
