@@ -117,6 +117,9 @@ create table if not exists message_usage_fact (
   cache_write_tokens integer not null,
   total_tokens integer not null
 );
+
+create index if not exists idx_muf_time_created on message_usage_fact(time_created);
+create index if not exists idx_muf_session_id on message_usage_fact(session_id);
 `
 
 export const pricingBootstrapSql = `

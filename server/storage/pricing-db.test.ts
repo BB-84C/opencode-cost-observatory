@@ -24,6 +24,16 @@ function tableNames(file: string) {
   }
 }
 
+function indexNames(file: string) {
+  const sqlite = new Database(file, { readonly: true })
+  try {
+    const rows = sqlite.prepare("select name from sqlite_master where type = 'index' order by name asc").all() as Array<{ name: string }>
+    return rows.map((row) => row.name)
+  } finally {
+    sqlite.close()
+  }
+}
+
 function compileStorageFixture(source: string) {
   const fixturePath = path.join(storageDir, "__analytics-schema-typecheck.tmp.ts")
   const tsconfigPath = path.join(storageDir, "__analytics-schema-typecheck.tsconfig.json")
@@ -62,6 +72,17 @@ test("analytics bootstrap creates analytics tables without pricing tables", () =
   assert.equal(tables.includes("sync_state"), true)
   assert.equal(tables.includes("pricing_record"), false)
   assert.equal(tables.includes("pricing_source_event"), false)
+})
+
+test("analytics bootstrap creates message usage indexes for dashboard aggregates", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "oco-analytics-index-"))
+  const analyticsDbPath = path.join(root, "analytics.db")
+
+  bootstrapAnalyticsDb(analyticsDbPath)
+
+  const indexes = indexNames(analyticsDbPath)
+  assert.equal(indexes.includes("idx_muf_time_created"), true)
+  assert.equal(indexes.includes("idx_muf_session_id"), true)
 })
 
 test("pricing bootstrap creates pricing tables without analytics tables", () => {
