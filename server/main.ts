@@ -16,6 +16,7 @@ import { publicHeatmapRoutes } from "./routes/public-heatmap"
 import { seriesRoutes } from "./routes/series"
 import { syncRoutes } from "./routes/sync"
 import { queueColdStartAnalyticsRefresh } from "./services/cold-start-sync"
+import { schedulePrivateDashboardCacheWarmup } from "./services/dashboard-cache-warmup"
 import { createPasskeyService } from "./services/passkey-service"
 import { ensurePricingRegistryReady } from "./services/pricing-recovery"
 import { bootstrapAnalyticsDb } from "./storage/db"
@@ -87,10 +88,11 @@ export function createServer(_config: AppConfig = loadConfig()) {
       })
     })
     app.use(requireSession(passkeyService, { adminName: _config.adminName }))
-    app.use("/api", overviewRoutes(_config.analyticsDbPath, _config.pricingDbPath))
-    app.use("/api", seriesRoutes(_config.analyticsDbPath, _config.pricingDbPath))
-    app.use("/api", leaderboardsRoutes(_config.analyticsDbPath, _config.pricingDbPath))
-    app.use("/api", pricingRoutes(_config.analyticsDbPath, _config.pricingDbPath))
+    const cacheOptions = { cachePrivateResponses: true }
+    app.use("/api", overviewRoutes(_config.analyticsDbPath, _config.pricingDbPath, cacheOptions))
+    app.use("/api", seriesRoutes(_config.analyticsDbPath, _config.pricingDbPath, cacheOptions))
+    app.use("/api", leaderboardsRoutes(_config.analyticsDbPath, _config.pricingDbPath, cacheOptions))
+    app.use("/api", pricingRoutes(_config.analyticsDbPath, _config.pricingDbPath, cacheOptions))
     return app
   }
 
@@ -125,6 +127,11 @@ export async function startServer(config: AppConfig = loadConfig()) {
         } catch (error) {
           console.warn("cold-start analytics refresh was not queued", error)
         }
+      } else if (config.bb84VpsMode === "ingest") {
+        schedulePrivateDashboardCacheWarmup({
+          analyticsDbPath: config.analyticsDbPath,
+          pricingDbPath: config.pricingDbPath,
+        })
       }
       resolve(server)
     })
