@@ -20,9 +20,17 @@
       <button id="signin">Sign in with passkey</button>
       <div id="status" role="status"></div>
     </main>
-    <script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@10/dist/bundle/index.umd.min.js"></script>
+    <script src="https://unpkg.com/@simplewebauthn/browser@10/dist/bundle/index.umd.min.js"></script>
     <script>
       const status = document.querySelector('#status')
+      const params = new URLSearchParams(window.location.search)
+      const next = params.get('next') || '/'
+      async function redirectIfAlreadySignedIn() {
+        try {
+          const session = await fetch('/auth/session', { credentials: 'include' })
+          if (session.ok) window.location.href = next
+        } catch {}
+      }
       document.querySelector('#signin').addEventListener('click', async () => {
         try {
           status.textContent = 'Starting passkey sign-in...'
@@ -36,11 +44,12 @@
             body: JSON.stringify({ challengeKey, authenticationResponse })
           })
           if (!complete.ok) throw new Error('Passkey verification failed')
-          window.location.href = '/'
+          window.location.href = next
         } catch (error) {
           status.textContent = error.message || 'Sign-in failed'
         }
       })
+      redirectIfAlreadySignedIn()
     </script>
   </body>
 </html>

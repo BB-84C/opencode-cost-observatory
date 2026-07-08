@@ -25,10 +25,11 @@
       <button id="register">Register passkey</button>
       <div id="status" role="status"></div>
     </main>
-    <script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@10/dist/bundle/index.umd.min.js"></script>
+    <script src="https://unpkg.com/@simplewebauthn/browser@10/dist/bundle/index.umd.min.js"></script>
     <script>
       const status = document.querySelector('#status')
       const params = new URLSearchParams(window.location.search)
+      const next = params.get('next') || '/'
       document.querySelector('#register').addEventListener('click', async () => {
         try {
           status.textContent = 'Starting passkey registration...'
@@ -47,7 +48,7 @@
             body: JSON.stringify({ challengeKey, registrationResponse })
           })
           if (!complete.ok) throw new Error('Passkey registration failed')
-          window.location.href = '/'
+          window.location.href = next
         } catch (error) {
           status.textContent = error.message || 'Registration failed'
         }
