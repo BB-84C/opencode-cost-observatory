@@ -24,6 +24,25 @@ function formatHttpHost(host: string) {
   return host.includes(":") ? `[${host}]` : host
 }
 
+function defaultClientDistPath() {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "dist", "client")
+}
+
+function isSpaHtmlRequest(req: express.Request) {
+  if (req.method !== "GET" || !req.accepts("html")) {
+    return false
+  }
+
+  return ![
+    "/api/",
+    "/auth/",
+    "/badge/",
+    "/heatmap/",
+    "/login.html",
+    "/setup.html",
+  ].some((prefix) => req.path === prefix.slice(0, -1) || req.path.startsWith(prefix))
+}
+
 export function createServer(_config: AppConfig = loadConfig()) {
   bootstrapAnalyticsDb(_config.analyticsDbPath)
   ensurePricingRegistryReady(_config.analyticsDbPath, _config.pricingDbPath)
@@ -53,12 +72,21 @@ export function createServer(_config: AppConfig = loadConfig()) {
       origin: _config.webAuthnOrigin,
       sessionTtlSeconds: _config.authSessionTtlSeconds,
     }))
-    app.use(express.static(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "public"), { index: "index.html" }))
+    const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "public")
+    const clientDistDir = _config.clientDistPath ?? defaultClientDistPath()
+    app.use(express.static(publicDir, { index: false }))
+    app.use(express.static(clientDistDir, { index: false }))
+    app.get("*", (req, res, next) => {
+      if (!isSpaHtmlRequest(req)) {
+        next()
+        return
+      }
+
+      res.sendFile(path.join(clientDistDir, "index.html"), (error) => {
+        if (error) next()
+      })
+    })
     app.use(requireSession(passkeyService, { adminName: _config.adminName }))
-    app.use(overviewRoutes(_config.analyticsDbPath, _config.pricingDbPath))
-    app.use(seriesRoutes(_config.analyticsDbPath, _config.pricingDbPath))
-    app.use(leaderboardsRoutes(_config.analyticsDbPath, _config.pricingDbPath))
-    app.use(pricingRoutes(_config.analyticsDbPath, _config.pricingDbPath))
     app.use("/api", overviewRoutes(_config.analyticsDbPath, _config.pricingDbPath))
     app.use("/api", seriesRoutes(_config.analyticsDbPath, _config.pricingDbPath))
     app.use("/api", leaderboardsRoutes(_config.analyticsDbPath, _config.pricingDbPath))

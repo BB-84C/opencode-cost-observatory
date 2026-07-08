@@ -61,6 +61,7 @@ export type AppConfig = {
   authDbPath: string
   adminName: string
   authEncryptionKey?: string
+  clientDistPath?: string
 }
 
 function resolveProjectPath(target: string) {
