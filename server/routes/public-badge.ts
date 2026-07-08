@@ -44,7 +44,7 @@ export function publicBadgeRoutes(analyticsDbPath: string, pricingDbPath: string
     res.setHeader("Access-Control-Allow-Origin", "*")
     res.json({
       schemaVersion: 1,
-      label: typeof req.query.label === "string" && req.query.label.trim() ? req.query.label.trim() : "opencode tokens",
+      label: typeof req.query.label === "string" && req.query.label.trim() ? req.query.label.trim() : "lifetime tokens",
       message: cache.message,
       color: "blue",
       cacheSeconds: CACHE_SECONDS,
