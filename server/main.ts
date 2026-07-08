@@ -16,7 +16,6 @@ import { publicHeatmapRoutes } from "./routes/public-heatmap"
 import { seriesRoutes } from "./routes/series"
 import { syncRoutes } from "./routes/sync"
 import { queueColdStartAnalyticsRefresh } from "./services/cold-start-sync"
-import { schedulePrivateDashboardCacheWarmup } from "./services/dashboard-cache-warmup"
 import { createPasskeyService } from "./services/passkey-service"
 import { ensurePricingRegistryReady } from "./services/pricing-recovery"
 import { bootstrapAnalyticsDb } from "./storage/db"
@@ -128,9 +127,6 @@ export async function startServer(config: AppConfig = loadConfig()) {
           console.warn("cold-start analytics refresh was not queued", error)
         }
       }
-      // NOTE: schedulePrivateDashboardCacheWarmup removed: synchronous buildOverview x3 + buildSeries x3 + leaderboards x2
-      // blocked the Node event loop for ~40s on 2-vCPU VPS, making /health and public routes hang during startup.
-      // Cache still populates lazily on first user request (5-10s cold hit), then 60s TTL serves subsequent hits instantly.
       resolve(server)
     })
 

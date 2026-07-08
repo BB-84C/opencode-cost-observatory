@@ -27,7 +27,7 @@ export class JsonResponseCache {
   }
 }
 
-export const dashboardPrivateResponseCache = new JsonResponseCache(60_000)
+export const dashboardPrivateResponseCache = new JsonResponseCache(5_000)
 
 export function buildResponseCacheKey(scope: string, routePath: string, query: Record<string, unknown> = {}) {
   const params = new URLSearchParams()
