@@ -36,6 +36,32 @@ type UsageFactRow = {
   total_tokens: number
 }
 
+type UsageAggregateRow = {
+  provider_id: string
+  model_id: string
+  first_seen: number
+  last_seen: number
+  message_count: number
+  input_tokens: number
+  output_tokens: number
+  reasoning_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  total_tokens: number
+}
+
+type SeriesUsageAggregateRow = UsageAggregateRow & {
+  bucket_start: string
+}
+
+type SessionUsageAggregateRow = UsageAggregateRow & {
+  session_id: string
+}
+
+type UsageSpendInput = Pick<UsageFactRow, "provider_id" | "model_id" | "time_created" | "input_tokens" | "output_tokens" | "reasoning_tokens" | "cache_read_tokens" | "cache_write_tokens" | "total_tokens">
+
+type PricingGapInput = UsageSpendInput & { message_count?: number }
+
 type PricingCoverageGap = {
   providerId: string
   modelId: string
@@ -299,24 +325,49 @@ function normalizeAnalyticsUnixSeconds(value: number) {
   return value > 10_000_000_000 ? Math.floor(value / 1000) : value
 }
 
-function resolvePriceForUsage(rows: PricingResolverRow[], usage: UsageFactRow) {
+const normalizedUsageTimeSql = "case when time_created > 10000000000 then cast(time_created / 1000 as integer) else time_created end"
+
+function aggregateAsUsage(row: UsageAggregateRow): UsageSpendInput {
+  return {
+    provider_id: row.provider_id,
+    model_id: row.model_id,
+    time_created: row.last_seen,
+    input_tokens: row.input_tokens,
+    output_tokens: row.output_tokens,
+    reasoning_tokens: row.reasoning_tokens,
+    cache_read_tokens: row.cache_read_tokens,
+    cache_write_tokens: row.cache_write_tokens,
+    total_tokens: row.total_tokens,
+  }
+}
+
+function aggregateAsPricingGap(row: UsageAggregateRow): PricingGapInput {
+  return {
+    ...aggregateAsUsage(row),
+    time_created: row.first_seen,
+    message_count: row.message_count,
+  }
+}
+
+function resolvePriceForUsage(rows: PricingResolverRow[], usage: UsageSpendInput) {
   const modelKey = normalizePricingModelKey(usage.model_id)
   const usageTime = normalizeAnalyticsUnixSeconds(usage.time_created)
   const candidates = rows.filter((row) => rowMatchesPricingModelKey(modelKey, row))
   return candidates.length > 0 ? resolveCanonicalPrice(candidates, usageTime) : null
 }
 
-function addPricingCoverageGap(gaps: Map<string, PricingCoverageGap>, usage: UsageFactRow) {
+function addPricingCoverageGap(gaps: Map<string, PricingCoverageGap>, usage: PricingGapInput) {
   const providerId = usage.provider_id
   const modelId = usage.model_id
   const modelKey = normalizePricingModelKey(modelId)
   const usageTime = normalizeAnalyticsUnixSeconds(usage.time_created)
   const key = `${providerId}\u0000${modelId}`
   const existing = gaps.get(key)
+  const messageCount = usage.message_count ?? 1
 
   if (existing) {
     existing.totalTokens += usage.total_tokens
-    existing.messageCount += 1
+    existing.messageCount += messageCount
     existing.firstSeen = Math.min(existing.firstSeen, usageTime)
     existing.lastSeen = Math.max(existing.lastSeen, usageTime)
     return
@@ -326,7 +377,7 @@ function addPricingCoverageGap(gaps: Map<string, PricingCoverageGap>, usage: Usa
     providerId,
     modelId,
     totalTokens: usage.total_tokens,
-    messageCount: 1,
+    messageCount,
     firstSeen: usageTime,
     lastSeen: usageTime,
     reason: "no_matching_pricing_record",
@@ -334,7 +385,7 @@ function addPricingCoverageGap(gaps: Map<string, PricingCoverageGap>, usage: Usa
   })
 }
 
-function calculateUsageSpend(priceRows: PricingResolverRow[], usage: UsageFactRow) {
+function calculateUsageSpend(priceRows: PricingResolverRow[], usage: UsageSpendInput) {
   const price = resolvePriceForUsage(priceRows, usage)
   if (!price) {
     return null
@@ -359,6 +410,107 @@ function calculateUsageSpend(priceRows: PricingResolverRow[], usage: UsageFactRo
       reasoningBillingRule: reasoningBillingRule.kind,
     },
   )
+}
+
+function usageAggregateSelect() {
+  return `
+    provider_id,
+    model_id,
+    min(${normalizedUsageTimeSql}) as first_seen,
+    max(${normalizedUsageTimeSql}) as last_seen,
+    count(*) as message_count,
+    sum(input_tokens) as input_tokens,
+    sum(output_tokens) as output_tokens,
+    sum(reasoning_tokens) as reasoning_tokens,
+    sum(cache_read_tokens) as cache_read_tokens,
+    sum(cache_write_tokens) as cache_write_tokens,
+    sum(total_tokens) as total_tokens
+  `
+}
+
+function buildUsageTimeWhere(bounds: { start: number; end: number }) {
+  const clauses: string[] = []
+  const params: number[] = []
+
+  if (Number.isFinite(bounds.start)) {
+    clauses.push("((time_created <= 10000000000 and time_created >= ?) or (time_created > 10000000000 and time_created >= ?))")
+    params.push(bounds.start, bounds.start * 1000)
+  }
+
+  if (Number.isFinite(bounds.end)) {
+    clauses.push("((time_created <= 10000000000 and time_created <= ?) or (time_created > 10000000000 and time_created <= ?))")
+    params.push(bounds.end, bounds.end * 1000)
+  }
+
+  return {
+    sql: clauses.length > 0 ? `where ${clauses.join(" and ")}` : "",
+    params,
+  }
+}
+
+function readUsageAggregates(databasePath: string, bounds?: { start: number; end: number }) {
+  const db = openAnalyticsReadonlyDb(databasePath)
+  const where = bounds ? buildUsageTimeWhere(bounds) : { sql: "", params: [] as number[] }
+
+  try {
+    return db.sqlite.prepare(`
+      select ${usageAggregateSelect()}
+      from message_usage_fact
+      ${where.sql}
+      group by provider_id, model_id
+      order by provider_id asc, model_id asc
+    `).all(...where.params) as UsageAggregateRow[]
+  } finally {
+    db.sqlite.close()
+  }
+}
+
+function seriesBucketSql(granularity: SeriesGranularity) {
+  switch (granularity) {
+    case "hourly":
+      return `strftime('%Y-%m-%dT%H:00:00.000Z', ${normalizedUsageTimeSql}, 'unixepoch')`
+    case "daily":
+      return `strftime('%Y-%m-%dT00:00:00.000Z', ${normalizedUsageTimeSql}, 'unixepoch')`
+    case "weekly":
+      return `strftime('%Y-%m-%dT00:00:00.000Z', datetime(${normalizedUsageTimeSql}, 'unixepoch', '-' || ((cast(strftime('%w', datetime(${normalizedUsageTimeSql}, 'unixepoch')) as integer) + 6) % 7) || ' days'))`
+    case "monthly":
+      return `strftime('%Y-%m-01T00:00:00.000Z', ${normalizedUsageTimeSql}, 'unixepoch')`
+  }
+}
+
+function readSeriesUsageAggregates(databasePath: string, granularity: SeriesGranularity, bounds: { start: number; end: number }) {
+  const db = openAnalyticsReadonlyDb(databasePath)
+  const where = buildUsageTimeWhere(bounds)
+  const bucketSql = seriesBucketSql(granularity)
+
+  try {
+    return db.sqlite.prepare(`
+      select ${bucketSql} as bucket_start,
+             ${usageAggregateSelect()}
+      from message_usage_fact
+      ${where.sql}
+      group by bucket_start, provider_id, model_id
+      order by bucket_start asc, provider_id asc, model_id asc
+    `).all(...where.params) as SeriesUsageAggregateRow[]
+  } finally {
+    db.sqlite.close()
+  }
+}
+
+function readSessionUsageAggregates(databasePath: string) {
+  const db = openAnalyticsReadonlyDb(databasePath)
+
+  try {
+    return db.sqlite.prepare(`
+      select session_id,
+             ${usageAggregateSelect()}
+      from message_usage_fact
+      group by session_id, provider_id, model_id
+      order by session_id asc, provider_id asc, model_id asc
+    `).all() as SessionUsageAggregateRow[]
+  } finally {
+    db.sqlite.close()
+  }
 }
 
 function readUsageFacts(databasePath: string) {
@@ -409,7 +561,13 @@ export function readPricingRecords(pricingDbPath: string) {
 
 export function readObservedPricingCoverage(analyticsDbPath: string, pricingDbPath: string, asOfTime = Math.floor(Date.now() / 1000)) {
   return buildObservedPricingCoverageRows({
-    usageFacts: readUsageFacts(analyticsDbPath),
+    usageFacts: readUsageAggregates(analyticsDbPath).map((row) => ({
+      provider_id: row.provider_id,
+      model_id: row.model_id,
+      time_created: row.last_seen,
+      total_tokens: row.total_tokens,
+      message_count: row.message_count,
+    })),
     pricingRows: readPricingRecords(pricingDbPath),
     asOfTime,
   })
@@ -616,7 +774,7 @@ export function buildOverview(
   now = Math.floor(Date.now() / 1000),
   window: string | ParsedDashboardWindow | undefined = "30d",
 ) {
-  const usageRows = readUsageFacts(analyticsDbPath)
+  const lifetimeRows = readUsageAggregates(analyticsDbPath)
   const priceRows = readPricingRecords(pricingDbPath)
   const syncState = readSyncStateRaw(analyticsDbPath)
   const windowBounds = isParsedDashboardWindow(window)
@@ -625,6 +783,9 @@ export function buildOverview(
         start: Number.isFinite(getOverviewWindowSeconds(window)) ? now - getOverviewWindowSeconds(window) : Number.NEGATIVE_INFINITY,
         end: Number.POSITIVE_INFINITY,
       }
+  const windowRows = !Number.isFinite(windowBounds.start) && !Number.isFinite(windowBounds.end)
+    ? lifetimeRows
+    : readUsageAggregates(analyticsDbPath, windowBounds)
 
   let lifetimeTokens = 0
   let lifetimeSpendUsd: number | null = 0
@@ -634,24 +795,25 @@ export function buildOverview(
   let windowPricedTokens = 0
   const pricingCoverageGaps = new Map<string, PricingCoverageGap>()
 
-  for (const usage of usageRows) {
-    const usageTime = normalizeAnalyticsUnixSeconds(usage.time_created)
-    lifetimeTokens += usage.total_tokens
+  for (const aggregate of lifetimeRows) {
+    const usage = aggregateAsUsage(aggregate)
+    lifetimeTokens += aggregate.total_tokens
     const spend = calculateUsageSpend(priceRows, usage)
 
     if (spend != null) {
       lifetimeSpendUsd = (lifetimeSpendUsd ?? 0) + spend.totalUsd
-      pricedTokens += usage.total_tokens
+      pricedTokens += aggregate.total_tokens
     } else {
-      addPricingCoverageGap(pricingCoverageGaps, usage)
+      addPricingCoverageGap(pricingCoverageGaps, aggregateAsPricingGap(aggregate))
     }
+  }
 
-    if (usageTime >= windowBounds.start && usageTime <= windowBounds.end) {
-      windowTokens += usage.total_tokens
-      if (spend != null) {
-        windowSpendUsd = (windowSpendUsd ?? 0) + spend.totalUsd
-        windowPricedTokens += usage.total_tokens
-      }
+  for (const aggregate of windowRows) {
+    windowTokens += aggregate.total_tokens
+    const spend = calculateUsageSpend(priceRows, aggregateAsUsage(aggregate))
+    if (spend != null) {
+      windowSpendUsd = (windowSpendUsd ?? 0) + spend.totalUsd
+      windowPricedTokens += aggregate.total_tokens
     }
   }
 
@@ -672,56 +834,16 @@ export function buildOverview(
   }
 }
 
-function startOfUtcHour(unixSeconds: number) {
-  const date = new Date(unixSeconds * 1000)
-  date.setUTCMinutes(0, 0, 0)
-  return date
-}
-
-function startOfUtcDay(unixSeconds: number) {
-  const date = new Date(unixSeconds * 1000)
-  date.setUTCHours(0, 0, 0, 0)
-  return date
-}
-
-function startOfUtcWeek(unixSeconds: number) {
-  const date = startOfUtcDay(unixSeconds)
-  const day = date.getUTCDay()
-  const daysFromMonday = (day + 6) % 7
-  date.setUTCDate(date.getUTCDate() - daysFromMonday)
-  return date
-}
-
-function startOfUtcMonth(unixSeconds: number) {
-  const date = new Date(unixSeconds * 1000)
-  date.setUTCDate(1)
-  date.setUTCHours(0, 0, 0, 0)
-  return date
-}
-
-function getBucketStart(unixSeconds: number, granularity: SeriesGranularity) {
-  switch (granularity) {
-    case "hourly":
-      return startOfUtcHour(unixSeconds)
-    case "daily":
-      return startOfUtcDay(unixSeconds)
-    case "weekly":
-      return startOfUtcWeek(unixSeconds)
-    case "monthly":
-      return startOfUtcMonth(unixSeconds)
-  }
-}
-
 export function buildSeries(
   analyticsDbPath: string,
   pricingDbPath: string,
   options: { granularity?: SeriesGranularity; metrics?: SeriesMetric[]; window?: DashboardWindowRange; now?: number } = {},
 ) {
-  const usageRows = readUsageFacts(analyticsDbPath)
   const priceRows = readPricingRecords(pricingDbPath)
   const granularity = options.granularity ?? "daily"
   const now = options.now ?? Math.floor(Date.now() / 1000)
   const windowBounds = getWindowBounds(options.window, now, "30d")
+  const usageRows = readSeriesUsageAggregates(analyticsDbPath, granularity, windowBounds)
   const metrics: SeriesMetric[] = options.metrics && options.metrics.length > 0
     ? [...new Set(options.metrics)]
     : ["inputTokens", "outputTokens", "reasoningTokens", "cacheReadTokens", "cacheWriteTokens", "cost"]
@@ -744,13 +866,7 @@ export function buildSeries(
   }>()
 
   for (const usage of usageRows) {
-    const usageTime = normalizeAnalyticsUnixSeconds(usage.time_created)
-
-    if (usageTime < windowBounds.start || usageTime > windowBounds.end) {
-      continue
-    }
-
-    const bucketStart = getBucketStart(usageTime, granularity).toISOString()
+    const bucketStart = usage.bucket_start
     const bucket = buckets.get(bucketStart) ?? {
       bucketStart,
       inputTokens: 0,
@@ -762,7 +878,7 @@ export function buildSeries(
       pricedTokens: 0,
       unpricedTokens: 0,
     }
-    const spend = calculateUsageSpend(priceRows, usage)
+    const spend = calculateUsageSpend(priceRows, aggregateAsUsage(usage))
     bucket.inputTokens += usage.input_tokens
     bucket.outputTokens += usage.output_tokens
     bucket.reasoningTokens += usage.reasoning_tokens
@@ -841,12 +957,12 @@ export function buildSeries(
 function buildSessionLeaderboardRows(analyticsDbPath: string, pricingDbPath: string) {
   const sessions = readSessionTree(analyticsDbPath)
   const priceRows = readPricingRecords(pricingDbPath)
-  const usageRows = readUsageFacts(analyticsDbPath)
+  const usageRows = readSessionUsageAggregates(analyticsDbPath)
   const sessionMetaById = new Map(sessions.map((session) => [session.session_id, session]))
   const usageBySession = new Map<string, { sessionId: string; totalTokens: number; totalCostUsd: number | null }>()
 
   for (const usage of usageRows) {
-    const spend = calculateUsageSpend(priceRows, usage)
+    const spend = calculateUsageSpend(priceRows, aggregateAsUsage(usage))
     const current = usageBySession.get(usage.session_id) ?? {
       sessionId: usage.session_id,
       totalTokens: 0,

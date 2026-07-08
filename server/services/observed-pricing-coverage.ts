@@ -6,6 +6,7 @@ type UsageLike = {
   model_id: string
   time_created: number
   total_tokens: number
+  message_count?: number
 }
 
 export type ObservedPricingCoverageRow = {
@@ -60,9 +61,10 @@ export function buildObservedPricingCoverageRows(args: {
     const candidates = args.pricingRows.filter((row) => rowMatchesPricingModelKey(usage.model_id, row))
     const resolved = candidates.length > 0 ? resolveEffectiveCanonicalPrice(candidates, asOfTime) : null
     const existing = grouped.get(key)
+    const messageCount = usage.message_count ?? 1
 
     if (existing) {
-      existing.messageCount += 1
+      existing.messageCount += messageCount
       existing.totalTokens += usage.total_tokens
       existing.firstSeen = Math.min(existing.firstSeen, usageTime)
       existing.lastSeen = Math.max(existing.lastSeen, usageTime)
@@ -84,7 +86,7 @@ export function buildObservedPricingCoverageRows(args: {
       reasoningPrice: resolved?.reasoning_price ?? null,
       cacheReadPrice: resolved?.cache_read_price ?? null,
       cacheWritePrice: resolved?.cache_write_price ?? null,
-      messageCount: 1,
+      messageCount,
       totalTokens: usage.total_tokens,
       firstSeen: usageTime,
       lastSeen: usageTime,
