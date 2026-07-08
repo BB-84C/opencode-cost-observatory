@@ -23,6 +23,7 @@ function closeServer(server: Server) {
 }
 
 function makeConfig(mode: "local" | "ingest", root: string): AppConfig {
+  const clientDistPath = path.join(root, "client-dist")
   return {
     port: 0,
     host: "127.0.0.1",
@@ -40,6 +41,7 @@ function makeConfig(mode: "local" | "ingest", root: string): AppConfig {
     authDbPath: path.join(root, "auth.db"),
     adminName: "admin",
     authEncryptionKey: mode === "ingest" ? "k".repeat(32) : undefined,
+    clientDistPath,
   }
 }
 
@@ -62,7 +64,7 @@ async function withServer(config: AppConfig, run: (baseUrl: string) => Promise<v
 test("createServer keeps dashboard routes token-gated in local mode and exposes public routes", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "oco-main-local-"))
   await withServer(makeConfig("local", root), async (baseUrl) => {
-    const overview = await fetch(`${baseUrl}/overview/lifetime`)
+    const overview = await fetch(`${baseUrl}/api/overview/lifetime`)
     assert.equal(overview.status, 401)
 
     const badge = await fetch(`${baseUrl}/badge/tokens`)
@@ -73,8 +75,11 @@ test("createServer keeps dashboard routes token-gated in local mode and exposes 
 test("createServer mounts ingest-mode upload/public/auth routes and protects dashboard reads", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "oco-main-ingest-"))
   const config = makeConfig("ingest", root)
+  fs.mkdirSync(config.clientDistPath!, { recursive: true })
+  fs.writeFileSync(path.join(config.clientDistPath!, "index.html"), "<!doctype html><div id=\"root\">built spa</div>")
+  fs.writeFileSync(path.join(config.clientDistPath!, "asset.txt"), "asset")
   await withServer(config, async (baseUrl) => {
-    const overview = await fetch(`${baseUrl}/overview/lifetime`)
+    const overview = await fetch(`${baseUrl}/api/overview/lifetime`)
     assert.equal(overview.status, 401)
 
     const service = createPasskeyService({
@@ -94,6 +99,18 @@ test("createServer mounts ingest-mode upload/public/auth routes and protects das
 
     const setup = await fetch(`${baseUrl}/auth/setup/status`)
     assert.equal(setup.status, 200)
+
+    const rootHtml = await fetch(`${baseUrl}/`, { headers: { accept: "text/html" } })
+    assert.equal(rootHtml.status, 200)
+    assert.match(await rootHtml.text(), /built spa/)
+
+    const nestedHtml = await fetch(`${baseUrl}/pricing/missing-models`, { headers: { accept: "text/html" } })
+    assert.equal(nestedHtml.status, 200)
+    assert.match(await nestedHtml.text(), /built spa/)
+
+    const asset = await fetch(`${baseUrl}/asset.txt`)
+    assert.equal(asset.status, 200)
+    assert.equal(await asset.text(), "asset")
 
     const ingest = await fetch(`${baseUrl}/api/ingest`, {
       method: "POST",
