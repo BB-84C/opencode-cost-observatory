@@ -111,6 +111,30 @@ button {
   min-height: 100%;
 }
 
+.dashboard-session-detail {
+  color: var(--muted);
+  display: block;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  margin-top: 0.35rem;
+}
+
+.dashboard-signout-button {
+  align-self: flex-end;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(20, 28, 44, 0.12);
+  border-radius: 999px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.55rem 0.85rem;
+}
+
+.dashboard-signout-button:hover {
+  transform: translateY(-1px);
+}
+
 .dashboard-eyebrow,
 .chart-panel__eyebrow,
 .console-button__eyebrow,

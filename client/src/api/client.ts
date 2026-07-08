@@ -85,6 +85,8 @@ export type SyncLifecycle = {
 
 export type AuthSessionResponse = {
   authenticated: boolean
+  username?: string
+  expiresAt?: number
 }
 
 export type LocalhostAuthPayload = {
@@ -218,6 +220,28 @@ export type CreatePricingRecordPayload = Omit<PricingRecordResponse, "observedTi
 
 export type DashboardWindow = DashboardWindowSelection
 
+export function buildLoginRedirectPath(nextPath: string) {
+  return `/login.html?next=${encodeURIComponent(nextPath)}`
+}
+
+function currentBrowserPath() {
+  if (typeof window === "undefined") {
+    return "/"
+  }
+  return `${window.location.pathname}${window.location.search}${window.location.hash}`
+}
+
+function redirectToLogin() {
+  if (typeof window === "undefined") {
+    return
+  }
+  window.location.href = buildLoginRedirectPath(currentBrowserPath())
+}
+
+function shouldRedirectOnUnauthorized(input: RequestInfo | URL) {
+  return !String(input).includes("/auth/localhost-token")
+}
+
 async function readJson<T>(input: RequestInfo | URL, init?: RequestInit) {
   const response = await fetch(input, {
     credentials: "include",
@@ -241,10 +265,21 @@ async function readJson<T>(input: RequestInfo | URL, init?: RequestInit) {
   if (!response.ok) {
     const code = payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string" ? payload.error : null
     const retryable = payload && typeof payload === "object" && "retryable" in payload ? payload.retryable === true : false
+    if (response.status === 401 && shouldRedirectOnUnauthorized(input)) {
+      redirectToLogin()
+    }
     throw new DashboardApiError(response.status, code, retryable, payload)
   }
 
   return payload as T
+}
+
+export async function fetchAppSession() {
+  const response = await readJson<AuthSessionResponse>("/auth/session")
+  return {
+    ...response,
+    authenticated: response.authenticated ?? Boolean(response.username),
+  }
 }
 
 export async function fetchOverview(window: DashboardWindow = { mode: "preset", preset: "30d" }) {
@@ -276,6 +311,13 @@ export async function requestRefresh() {
 
 export async function fetchAuthSession() {
   return await readJson<AuthSessionResponse>("/api/auth/session")
+}
+
+export async function logoutAppSession() {
+  return await readJson<{ success: boolean }>("/auth/logout", {
+    method: "POST",
+    body: JSON.stringify({}),
+  })
 }
 
 export async function authenticateWithLocalhostToken(payload: LocalhostAuthPayload = { authFilePath: ".run/dashboard.token" }) {

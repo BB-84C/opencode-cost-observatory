@@ -164,6 +164,7 @@ export default function DashboardPage() {
     markPricingManual,
     savePricing,
     createPricing,
+    signOut,
   } = useDashboardState(locale)
 
   const granularityLabel = {
@@ -204,6 +205,11 @@ export default function DashboardPage() {
             <div className="status-panel__block dashboard-header__status-card">
               <span className="status-panel__label">{copy.authSession}</span>
               <strong>{authSession.authenticated ? copy.authenticated : copy.unauthenticated}</strong>
+              {authSession.username ? (
+                <span className="dashboard-session-detail">
+                  Signed in as {authSession.username}{authSession.expiresAt ? `, expires ${new Date(authSession.expiresAt * 1000).toLocaleString(locale)}` : ""}
+                </span>
+              ) : null}
             </div>
             <BackendManagementPanel
               ariaLabel={copy.backendDiagnostics}
@@ -230,6 +236,9 @@ export default function DashboardPage() {
               locale={locale}
             />
           </div>
+          {authSession.username ? (
+            <button className="dashboard-signout-button" type="button" onClick={() => void signOut()}>Sign out</button>
+          ) : null}
           <LanguageToggle language={language} label={copy.switchLanguage} onToggle={toggleLanguage} />
         </div>
       </header>

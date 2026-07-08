@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { authenticateWithLocalhostToken, createPricingRecord, deletePricingRecord, fetchBackendControlStatus, fetchBackendDiagnostics, fetchCostLeaderboard, fetchObservedPricingCoverage, fetchOverview, fetchPricingRecords, fetchSeries, fetchSyncStatus, fetchTokenLeaderboard, requestRefresh, restartBackendService, startBackendService, updatePricingRecord, type AuthSessionResponse, type BackendControlResponse, type BackendDiagnosticsResponse, type CreatePricingRecordPayload, type DashboardWindow, type LeaderboardSession, type LocalhostAuthPayload, type ObservedPricingCoverageRow, type OverviewResponse, type PricingRecordResponse, type RefreshResponse, type SeriesGranularity, type SeriesMetric, type SeriesResponse } from "../api/client"
+import { authenticateWithLocalhostToken, createPricingRecord, deletePricingRecord, fetchAppSession, fetchBackendControlStatus, fetchBackendDiagnostics, fetchCostLeaderboard, fetchObservedPricingCoverage, fetchOverview, fetchPricingRecords, fetchSeries, fetchSyncStatus, fetchTokenLeaderboard, logoutAppSession, requestRefresh, restartBackendService, startBackendService, updatePricingRecord, type AuthSessionResponse, type BackendControlResponse, type BackendDiagnosticsResponse, type CreatePricingRecordPayload, type DashboardWindow, type LeaderboardSession, type LocalhostAuthPayload, type ObservedPricingCoverageRow, type OverviewResponse, type PricingRecordResponse, type RefreshResponse, type SeriesGranularity, type SeriesMetric, type SeriesResponse } from "../api/client"
 import { isRetryableAnalyticsBusyError } from "../lib/dashboard-api-error"
 import { retryAnalyticsBusy } from "../lib/dashboard-retry"
 
@@ -277,6 +277,42 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
   latestQuery.current = { window, granularity: effectiveGranularity }
 
   const load = useCallback(async (requestId: number, nextWindow: DashboardWindow, nextGranularity: SeriesGranularity) => {
+    const appSession = await fetchAppSession()
+
+    if (!requestTracker.current.isCurrent(requestId)) {
+      return false
+    }
+
+    if (appSession.username) {
+      setAuthSession(appSession)
+      setBackendDiagnostics(null)
+      setBackendStatus("authenticated")
+      setUpdateStatus(null)
+
+      const [overviewResponse, seriesResponse, costLeaderboardResponse, tokenLeaderboardResponse, pricingRecordsResponse, observedCoverageResponse] = await Promise.all([
+        fetchOverview(nextWindow),
+        fetchSeries(nextGranularity, nextWindow, ["cost", "inputTokens", "outputTokens", "reasoningTokens", "cacheReadTokens", "cacheWriteTokens"]),
+        fetchCostLeaderboard(),
+        fetchTokenLeaderboard(),
+        fetchPricingRecords(),
+        fetchObservedPricingCoverage(),
+      ])
+
+      if (!requestTracker.current.isCurrent(requestId)) {
+        return false
+      }
+
+      setOverview(overviewResponse)
+      setSeries(seriesResponse)
+      setSyncState({})
+      setCostLeaderboard(costLeaderboardResponse.sessions)
+      setTokenLeaderboard(tokenLeaderboardResponse.sessions)
+      setPricingRecords(pricingRecordsResponse.records)
+      setObservedPricingCoverage(observedCoverageResponse.rows)
+      setLastLoadedAt(Date.now())
+      return appSession
+    }
+
     let diagnosticsResponse: BackendDiagnosticsResponse
     try {
       diagnosticsResponse = await fetchBackendDiagnostics()
@@ -487,6 +523,14 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
     }
   }, [loadWithBusyRetry])
 
+  const signOut = useCallback(async () => {
+    try {
+      await logoutAppSession()
+    } finally {
+      globalThis.window.location.href = "/login.html"
+    }
+  }, [])
+
   const reloadAfterBackendControl = useCallback(async () => {
     const requestId = requestTracker.current.issue()
     const query = latestQuery.current
@@ -633,5 +677,6 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
     markPricingManual,
     savePricing,
     createPricing,
+    signOut,
   }
 }
