@@ -127,12 +127,10 @@ export async function startServer(config: AppConfig = loadConfig()) {
         } catch (error) {
           console.warn("cold-start analytics refresh was not queued", error)
         }
-      } else if (config.bb84VpsMode === "ingest") {
-        schedulePrivateDashboardCacheWarmup({
-          analyticsDbPath: config.analyticsDbPath,
-          pricingDbPath: config.pricingDbPath,
-        })
       }
+      // NOTE: schedulePrivateDashboardCacheWarmup removed: synchronous buildOverview x3 + buildSeries x3 + leaderboards x2
+      // blocked the Node event loop for ~40s on 2-vCPU VPS, making /health and public routes hang during startup.
+      // Cache still populates lazily on first user request (5-10s cold hit), then 60s TTL serves subsequent hits instantly.
       resolve(server)
     })
 
