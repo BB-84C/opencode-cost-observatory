@@ -3,9 +3,13 @@ import { Router } from "express"
 import { buildOverview } from "../services/dashboard-analytics"
 import { tryRespondWithAnalyticsBusy } from "../services/sqlite-busy"
 import { parseDashboardWindowQuery } from "../services/window-range"
+import { buildRequestCacheKey, sendJsonWithOptionalCache } from "../utils/response-cache"
 
-export function overviewRoutes(analyticsDbPath: string, pricingDbPath: string) {
+type DashboardRouteOptions = { cachePrivateResponses?: boolean }
+
+export function overviewRoutes(analyticsDbPath: string, pricingDbPath: string, options: DashboardRouteOptions = {}) {
   const router = Router()
+  const cacheEnabled = options.cachePrivateResponses === true
 
   router.get("/overview/lifetime", (req, res) => {
     const hasWindow = Object.prototype.hasOwnProperty.call(req.query, "window")
@@ -13,7 +17,7 @@ export function overviewRoutes(analyticsDbPath: string, pricingDbPath: string) {
 
     if (!hasWindow) {
       try {
-        res.json(buildOverview(analyticsDbPath, pricingDbPath, now, undefined))
+        sendJsonWithOptionalCache(res, buildRequestCacheKey("overview", req), cacheEnabled, () => buildOverview(analyticsDbPath, pricingDbPath, now, undefined))
       } catch (error) {
         if (tryRespondWithAnalyticsBusy(res, error)) {
           return
@@ -35,7 +39,7 @@ export function overviewRoutes(analyticsDbPath: string, pricingDbPath: string) {
     }
 
     try {
-      res.json(buildOverview(analyticsDbPath, pricingDbPath, now, parsedWindow))
+      sendJsonWithOptionalCache(res, buildRequestCacheKey("overview", req), cacheEnabled, () => buildOverview(analyticsDbPath, pricingDbPath, now, parsedWindow))
     } catch (error) {
       if (tryRespondWithAnalyticsBusy(res, error)) {
         return

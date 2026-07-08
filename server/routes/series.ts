@@ -3,6 +3,7 @@ import { Router } from "express"
 import { buildSeries, type SeriesGranularity, type SeriesMetric } from "../services/dashboard-analytics"
 import { tryRespondWithAnalyticsBusy } from "../services/sqlite-busy"
 import { parseDashboardWindowQuery } from "../services/window-range"
+import { buildRequestCacheKey, sendJsonWithOptionalCache } from "../utils/response-cache"
 
 const validGranularities = new Set<SeriesGranularity>(["hourly", "daily", "weekly", "monthly"])
 const validMetrics = new Set<SeriesMetric>(["inputTokens", "outputTokens", "reasoningTokens", "cacheReadTokens", "cacheWriteTokens", "cost"])
@@ -24,8 +25,11 @@ function parseMetrics(raw: unknown): SeriesMetric[] | null {
   return metrics.every((metric) => validMetrics.has(metric as SeriesMetric)) ? metrics as SeriesMetric[] : null
 }
 
-export function seriesRoutes(analyticsDbPath: string, pricingDbPath: string) {
+type DashboardRouteOptions = { cachePrivateResponses?: boolean }
+
+export function seriesRoutes(analyticsDbPath: string, pricingDbPath: string, options: DashboardRouteOptions = {}) {
   const router = Router()
+  const cacheEnabled = options.cachePrivateResponses === true
 
   router.get("/series/:granularity", (req, res) => {
     const granularity = parseGranularity(req.params.granularity)
@@ -59,7 +63,7 @@ export function seriesRoutes(analyticsDbPath: string, pricingDbPath: string) {
     }
 
     try {
-      res.json(buildSeries(analyticsDbPath, pricingDbPath, {
+      sendJsonWithOptionalCache(res, buildRequestCacheKey("series", req), cacheEnabled, () => buildSeries(analyticsDbPath, pricingDbPath, {
         granularity,
         metrics,
         window: parsedWindow ?? "all",

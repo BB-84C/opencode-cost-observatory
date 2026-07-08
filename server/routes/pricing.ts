@@ -7,6 +7,7 @@ import { openAnalyticsDb } from "../storage/db"
 import { openPricingDb } from "../storage/pricing-db"
 import { pricing_record, sync_state } from "../storage/schema.sql"
 import { readObservedPricingCoverage, readPricingRecords } from "../services/dashboard-analytics"
+import { buildRequestCacheKey, dashboardPrivateResponseCache, sendJsonWithOptionalCache } from "../utils/response-cache"
 
 const reasoningBillingRuleSchema = z.object({
   kind: z.enum(["per_token", "included_in_output"]),
@@ -225,12 +226,15 @@ function updatePricingRecord(
   return readPricingRecord(pricingDbPath, id)
 }
 
-export function pricingRoutes(analyticsDbPath: string, pricingDbPath: string) {
-  const router = Router()
+type DashboardRouteOptions = { cachePrivateResponses?: boolean }
 
-  router.get("/pricing/records", (_req, res) => {
+export function pricingRoutes(analyticsDbPath: string, pricingDbPath: string, options: DashboardRouteOptions = {}) {
+  const router = Router()
+  const cacheEnabled = options.cachePrivateResponses === true
+
+  router.get("/pricing/records", (req, res) => {
     try {
-      res.json({ records: readPricingRecords(pricingDbPath).map(toApiRecord) })
+      sendJsonWithOptionalCache(res, buildRequestCacheKey("pricing", req), cacheEnabled, () => ({ records: readPricingRecords(pricingDbPath).map(toApiRecord) }))
     } catch (error) {
       if (tryRespondWithAnalyticsBusy(res, error)) {
         return
@@ -239,9 +243,9 @@ export function pricingRoutes(analyticsDbPath: string, pricingDbPath: string) {
     }
   })
 
-  router.get("/pricing/observed-coverage", (_req, res) => {
+  router.get("/pricing/observed-coverage", (req, res) => {
     try {
-      res.json({ rows: readObservedPricingCoverage(analyticsDbPath, pricingDbPath) })
+      sendJsonWithOptionalCache(res, buildRequestCacheKey("pricing", req), cacheEnabled, () => ({ rows: readObservedPricingCoverage(analyticsDbPath, pricingDbPath) }))
     } catch (error) {
       if (tryRespondWithAnalyticsBusy(res, error)) {
         return
@@ -252,6 +256,7 @@ export function pricingRoutes(analyticsDbPath: string, pricingDbPath: string) {
 
   router.post("/pricing/refresh", (_req, res) => {
     try {
+      if (cacheEnabled) dashboardPrivateResponseCache.clear()
       res.json(queuePricingRefresh(analyticsDbPath))
     } catch (error) {
       if (tryRespondWithAnalyticsBusy(res, error)) {
@@ -265,6 +270,7 @@ export function pricingRoutes(analyticsDbPath: string, pricingDbPath: string) {
     try {
       const payload = pricingRecordCreateSchema.parse(req.body)
       const record = insertPricingRecord(pricingDbPath, payload)
+      if (cacheEnabled) dashboardPrivateResponseCache.clear()
       res.status(201).json({ record: record ? toApiRecord(record) : null })
     } catch (error) {
       if (tryRespondWithAnalyticsBusy(res, error)) {
@@ -284,6 +290,7 @@ export function pricingRoutes(analyticsDbPath: string, pricingDbPath: string) {
         return
       }
 
+      if (cacheEnabled) dashboardPrivateResponseCache.clear()
       res.json({ record: toApiRecord(record) })
     } catch (error) {
       if (tryRespondWithAnalyticsBusy(res, error)) {
@@ -330,6 +337,7 @@ export function pricingRoutes(analyticsDbPath: string, pricingDbPath: string) {
       throw error
     }
 
+    if (cacheEnabled) dashboardPrivateResponseCache.clear()
     res.json({ deleted: true, id: req.params.id, tombstoned: true })
   })
 
