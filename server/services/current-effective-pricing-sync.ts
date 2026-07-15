@@ -7,6 +7,7 @@ export type CurrentEffectivePricingSyncResult = {
   inserted: number
   updated: number
   unchanged: number
+  supersededDuplicates: number
   total: number
 }
 
@@ -80,6 +81,20 @@ function archivePricingRecord(db: PricingDb, id: string, now: number) {
   `).run(archiveId, now, id)
 }
 
+function supersedeActiveIdentityDuplicates(db: PricingDb, draft: PricingRecordDraft, now: number) {
+  const result = db.sqlite.prepare(`
+    update pricing_record
+    set enabled = 0, superseded_time = ?
+    where canonical_vendor = ?
+      and canonical_model = ?
+      and id <> ?
+      and enabled = 1
+      and superseded_time is null
+  `).run(now, draft.canonical_vendor, draft.canonical_model, draft.id)
+
+  return result.changes
+}
+
 export function syncCurrentEffectivePricingSeed(pricingDbPath: string, now = Math.floor(Date.now() / 1000)): CurrentEffectivePricingSyncResult {
   const drafts = materializeCurrentEffectivePricingSeed(now).map(createPricingRecordDraft)
   const db = openPricingDb(pricingDbPath)
@@ -90,10 +105,15 @@ export function syncCurrentEffectivePricingSeed(pricingDbPath: string, now = Mat
         inserted: 0,
         updated: 0,
         unchanged: 0,
+        supersededDuplicates: 0,
         total: drafts.length,
       }
 
       for (const draft of drafts) {
+        if (draft.source_type === "official") {
+          result.supersededDuplicates += supersedeActiveIdentityDuplicates(db, draft, now)
+        }
+
         const existing = readPricingRecord(db, draft.id)
         if (!existing) {
           db.insert(pricing_record).values(draft).run()
