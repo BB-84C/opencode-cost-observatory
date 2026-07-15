@@ -14,7 +14,8 @@
     "build": "vite build --config vite.config.ts",
     "check": "tsc --noEmit",
     "test": "node --import tsx --test \"server/**/*.test.ts\" \"client/**/*.test.ts\" \"uploader/**/*.test.ts\"",
-    "db:generate": "drizzle-kit generate --config drizzle.config.ts"
+    "db:generate": "drizzle-kit generate --config drizzle.config.ts",
+    "pricing:sync-current": "tsx server/commands/pricing-sync-current.ts"
   },
   "dependencies": {
     "@simplewebauthn/server": "^10.0.1",

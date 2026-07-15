@@ -553,6 +553,75 @@ test("ensurePricingRegistryReady seeds current effective rows when no durable or
   assert.equal(models.get("kimi-2.6")?.output_price, 4)
   assert.equal(models.get("kimi-2.6")?.cache_read_price, 0.16)
   assert.equal(models.get("kimi-2.6")?.source_url, "https://platform.kimi.ai/docs/pricing/chat-k26")
+  for (const [model, expected] of Object.entries({
+    "gpt-5.6-sol": {
+      input: 5,
+      output: 30,
+      reasoning: 30,
+      cacheRead: 0.5,
+      cacheWrite: 6.25,
+      sourceUrl: "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+    },
+    "gpt-5.6-terra": {
+      input: 2.5,
+      output: 15,
+      reasoning: 15,
+      cacheRead: 0.25,
+      cacheWrite: 3.125,
+      sourceUrl: "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+    },
+    "gpt-5.6-luna": {
+      input: 1,
+      output: 6,
+      reasoning: 6,
+      cacheRead: 0.1,
+      cacheWrite: 1.25,
+      sourceUrl: "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+    },
+    "claude-opus-4-8": {
+      input: 5,
+      output: 25,
+      reasoning: 0,
+      cacheRead: 0.5,
+      cacheWrite: 6.25,
+      sourceUrl: "https://claude.com/pricing",
+    },
+    "claude-sonnet-5": {
+      input: 2,
+      output: 10,
+      reasoning: 0,
+      cacheRead: 0.2,
+      cacheWrite: 2.5,
+      sourceUrl: "https://claude.com/pricing",
+    },
+  })) {
+    const row = models.get(model)
+    assert.ok(row, `expected ${model} in current effective pricing seed`)
+    assert.equal(row.input_price, expected.input)
+    assert.equal(row.output_price, expected.output)
+    assert.equal(row.reasoning_price, expected.reasoning)
+    assert.equal(row.cache_read_price, expected.cacheRead)
+    assert.equal(row.cache_write_price, expected.cacheWrite)
+    assert.equal(row.source_type, "official")
+    assert.equal(row.source_url, expected.sourceUrl)
+    assert.deepEqual(JSON.parse(row.reasoning_billing_rule_json), {
+      kind: model.startsWith("gpt-") ? "per_token" : "included_in_output",
+      provenance: { sourceType: "official", sourceUrl: expected.sourceUrl },
+    })
+  }
+  const codexMini = models.get("gpt-5.1-codex-mini")
+  assert.ok(codexMini, "expected gpt-5.1-codex-mini in current effective pricing seed")
+  assert.equal(codexMini.cache_read_price, 0.025)
+  assert.equal(codexMini.source_type, "official")
+  assert.equal(codexMini.source_url, "https://developers.openai.com/api/docs/models/gpt-5.1-codex-mini")
+  assert.deepEqual(JSON.parse(codexMini.reasoning_billing_rule_json), {
+    kind: "per_token",
+    provenance: {
+      sourceType: "official",
+      sourceUrl: "https://developers.openai.com/api/docs/models/gpt-5.1-codex-mini",
+    },
+  })
+  assert.equal(rows.every((row) => row.source_type === "official"), true)
   assert.equal(rows.every((row) => row.effective_time === now && row.observed_time === now), true)
 })
 
