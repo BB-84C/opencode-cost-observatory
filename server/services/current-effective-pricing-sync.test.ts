@@ -14,7 +14,10 @@ const now = 1_746_493_200
 
 type PricingRow = {
   id: string
+  canonical_vendor: string
   canonical_model: string
+  vendor_model_id: string
+  currency: string
   input_price: number
   output_price: number
   reasoning_price: number
@@ -23,6 +26,8 @@ type PricingRow = {
   cache_write_price: number
   source_type: string
   source_url: string
+  confidence: string
+  is_manual_override: number
   effective_time: number
   observed_time: number | null
   superseded_time: number | null
@@ -61,12 +66,17 @@ test("syncCurrentEffectivePricingSeed inserts the complete current seed into an 
     "anthropic:claude-fable-5": { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5, url: "https://claude.com/pricing" },
     "anthropic:claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25, url: "https://claude.com/pricing" },
     "anthropic:claude-opus-4-6": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25, url: "https://claude.com/pricing" },
+    "anthropic:claude-opus-5": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25, url: "https://platform.claude.com/docs/en/about-claude/pricing" },
     "deepseek:deepseek-v4-flash": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0, url: "https://api-docs.deepseek.com/quick_start/pricing" },
     "deepseek:deepseek-v4-pro": { input: 0.435, output: 0.87, cacheRead: 0.003625, cacheWrite: 0, url: "https://api-docs.deepseek.com/quick_start/pricing" },
   })) {
     const row = models.get(id)
     assert.ok(row, `expected ${id} in current effective pricing seed`)
     assert.deepEqual(row && {
+      canonicalVendor: row.canonical_vendor,
+      canonicalModel: row.canonical_model,
+      vendorModelId: row.vendor_model_id,
+      currency: row.currency,
       input: row.input_price,
       output: row.output_price,
       reasoning: row.reasoning_price,
@@ -74,11 +84,19 @@ test("syncCurrentEffectivePricingSeed inserts the complete current seed into an 
       cacheWrite: row.cache_write_price,
       sourceType: row.source_type,
       url: row.source_url,
+      confidence: row.confidence,
+      isManualOverride: row.is_manual_override,
       reasoningBillingRule: JSON.parse(row.reasoning_billing_rule_json),
     }, {
       ...expected,
+      canonicalVendor: id.split(":")[0],
+      canonicalModel: id.split(":")[1],
+      vendorModelId: id.split(":")[1],
+      currency: "USD",
       reasoning: 0,
       sourceType: "official",
+      confidence: "high",
+      isManualOverride: 0,
       reasoningBillingRule: {
         kind: "included_in_output",
         provenance: { sourceType: "official", sourceUrl: expected.url },

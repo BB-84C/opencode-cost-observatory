@@ -27,6 +27,7 @@ function activePricingRows(pricingDbPath: string) {
       canonical_vendor: string
       canonical_model: string
       vendor_model_id: string
+      currency: string
       input_price: number
       output_price: number
       reasoning_price: number
@@ -35,6 +36,8 @@ function activePricingRows(pricingDbPath: string) {
       cache_write_price: number
       source_type: string
       source_url: string
+      confidence: string
+      is_manual_override: number
       effective_time: number
       observed_time: number | null
     }>
@@ -555,6 +558,7 @@ test("ensurePricingRegistryReady seeds current effective rows when no durable or
   assert.equal(models.get("kimi-2.6")?.source_url, "https://platform.kimi.ai/docs/pricing/chat-k26")
   for (const [model, expected] of Object.entries({
     "gpt-5.6-sol": {
+      vendor: "openai",
       input: 5,
       output: 30,
       reasoning: 30,
@@ -563,6 +567,7 @@ test("ensurePricingRegistryReady seeds current effective rows when no durable or
       sourceUrl: "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
     },
     "gpt-5.6-terra": {
+      vendor: "openai",
       input: 2.5,
       output: 15,
       reasoning: 15,
@@ -571,6 +576,7 @@ test("ensurePricingRegistryReady seeds current effective rows when no durable or
       sourceUrl: "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
     },
     "gpt-5.6-luna": {
+      vendor: "openai",
       input: 1,
       output: 6,
       reasoning: 6,
@@ -579,6 +585,7 @@ test("ensurePricingRegistryReady seeds current effective rows when no durable or
       sourceUrl: "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
     },
     "claude-opus-4-8": {
+      vendor: "anthropic",
       input: 5,
       output: 25,
       reasoning: 0,
@@ -586,7 +593,17 @@ test("ensurePricingRegistryReady seeds current effective rows when no durable or
       cacheWrite: 6.25,
       sourceUrl: "https://claude.com/pricing",
     },
+    "claude-opus-5": {
+      vendor: "anthropic",
+      input: 5,
+      output: 25,
+      reasoning: 0,
+      cacheRead: 0.5,
+      cacheWrite: 6.25,
+      sourceUrl: "https://platform.claude.com/docs/en/about-claude/pricing",
+    },
     "claude-sonnet-5": {
+      vendor: "anthropic",
       input: 2,
       output: 10,
       reasoning: 0,
@@ -602,8 +619,14 @@ test("ensurePricingRegistryReady seeds current effective rows when no durable or
     assert.equal(row.reasoning_price, expected.reasoning)
     assert.equal(row.cache_read_price, expected.cacheRead)
     assert.equal(row.cache_write_price, expected.cacheWrite)
+    assert.equal(row.canonical_vendor, expected.vendor)
+    assert.equal(row.canonical_model, model)
+    assert.equal(row.vendor_model_id, model)
+    assert.equal(row.currency, "USD")
     assert.equal(row.source_type, "official")
     assert.equal(row.source_url, expected.sourceUrl)
+    assert.equal(row.confidence, "high")
+    assert.equal(row.is_manual_override, 0)
     assert.deepEqual(JSON.parse(row.reasoning_billing_rule_json), {
       kind: model.startsWith("gpt-") ? "per_token" : "included_in_output",
       provenance: { sourceType: "official", sourceUrl: expected.sourceUrl },

@@ -422,6 +422,23 @@ export const CURRENT_EFFECTIVE_PRICING_SEED: SeedRow[] = [
     isManualOverride: false,
   },
   {
+    id: "anthropic:claude-opus-5",
+    canonicalVendor: "anthropic",
+    canonicalModel: "claude-opus-5",
+    vendorModelId: "claude-opus-5",
+    currency: "USD",
+    inputPrice: 5,
+    outputPrice: 25,
+    reasoningPrice: 0,
+    reasoningBillingRule: includedInOutput("official", "https://platform.claude.com/docs/en/about-claude/pricing"),
+    cacheReadPrice: 0.5,
+    cacheWritePrice: 6.25,
+    sourceType: "official",
+    sourceUrl: "https://platform.claude.com/docs/en/about-claude/pricing",
+    confidence: "high",
+    isManualOverride: false,
+  },
+  {
     // Introductory API pricing through 2026-08-31; official standard pricing is $3 input / $15 output afterward.
     id: "anthropic:claude-sonnet-5",
     canonicalVendor: "anthropic",
