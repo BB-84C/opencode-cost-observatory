@@ -565,78 +565,80 @@ export function MainSeriesChart(props: {
 
   const loadingLabel = props.loadingLabel ?? (isChineseLocale(locale) ? "加载中" : "Loading")
 
-  const MODEL_PALETTE = ["#f958aa", "#42b879", "#ff7437", "#910091", "#9bcd24", "#00b89c", "#ff5b43", "#4a87b9", "#d562d5", "#48a86e", "#e8a33d", "#6b7fd7", "#37b6a3", "#d14c6a", "#7a9e3f", "#b8860b"]
+  const MODEL_PALETTE = ["#f958aa", "#42b879", "#ff7437", "#910091", "#9bcd24", "#00b89c", "#ff5b43", "#4a87b9", "#d562d5", "#48a86e", "#e8a33d", "#6b7fd7", "#37b6a3", "#d14c6a", "#7a9e3f", "#b8860b", "#5f9ea0", "#cd5c5c", "#4682b4", "#d2691e"]
   const OTHERS_COLOR = "#8a94a6"
-  const MODEL_MIN_SHARE = 0.01
-  const MAX_MODEL_BANDS = 12
+  const BIN_TOP_MODEL_COUNT = 8
+  const MODEL_POOL_LIMIT = 20
   const layer = props.layer
   const modelBucketMap = new Map<string, SeriesModelBucket>()
   for (const bucket of props.modelPoints ?? []) {
     modelBucketMap.set(bucket.bucketStart, bucket)
   }
   const modelStatValue = (model: { totalTokens: number; totalCostUsd: number | null }) => stat === "cost" ? (model.totalCostUsd ?? 0) : model.totalTokens
-  const modelTotals = new Map<string, number>()
   const modelTokenTotals = new Map<string, number>()
-  const modelCostTotals = new Map<string, number>()
   for (const point of chartPoints) {
     const bucket = modelBucketMap.get(point.bucketStart)
     if (!bucket) {
       continue
     }
     for (const model of bucket.models) {
-      modelTotals.set(model.modelId, (modelTotals.get(model.modelId) ?? 0) + modelStatValue(model))
       modelTokenTotals.set(model.modelId, (modelTokenTotals.get(model.modelId) ?? 0) + model.totalTokens)
-      modelCostTotals.set(model.modelId, (modelCostTotals.get(model.modelId) ?? 0) + (model.totalCostUsd ?? 0))
     }
   }
-  const rankedModels = [...modelTotals.entries()].sort((a, b) => b[1] - a[1])
-  const totalTokenValue = [...modelTokenTotals.values()].reduce((sum, value) => sum + value, 0)
-  const totalCostValue = [...modelCostTotals.values()].reduce((sum, value) => sum + value, 0)
-  // A model earns its own band by presence: at least 1% of window tokens OR 1% of window cost.
-  // Band heights still reflect the selected stat; "Others" only holds the genuine tail.
-  const topModelIds: string[] = []
-  for (const [modelId] of rankedModels) {
-    if (topModelIds.length >= MAX_MODEL_BANDS) {
-      break
-    }
-    const tokenShare = totalTokenValue > 0 ? (modelTokenTotals.get(modelId) ?? 0) / totalTokenValue : 0
-    const costShare = totalCostValue > 0 ? (modelCostTotals.get(modelId) ?? 0) / totalCostValue : 0
-    if (tokenShare < MODEL_MIN_SHARE && costShare < MODEL_MIN_SHARE) {
+  // Global stable color pool: models ranked by window token volume keep a fixed
+  // color across all buckets so a model is traceable over time. The genuine
+  // long tail beyond the pool limit stays inside "Others" everywhere.
+  const globalModelIds = [...modelTokenTotals.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, MODEL_POOL_LIMIT)
+    .map(([modelId]) => modelId)
+  // Per-bucket dynamic composition: each bucket shows its own top-N models by
+  // token share (so deepseek appears in the last two days of a 90-day window
+  // even though gpt-5.4/5.5 dominate the window total). Models not selected
+  // for a given bucket fall into that bucket's "Others".
+  const selectedByBucket = new Map<string, string[]>()
+  for (const point of chartPoints) {
+    const bucket = modelBucketMap.get(point.bucketStart)
+    if (!bucket) {
       continue
     }
-    topModelIds.push(modelId)
+    const ranked = bucket.models
+      .filter((model) => globalModelIds.includes(model.modelId))
+      .sort((a, b) => b.totalTokens - a.totalTokens)
+      .slice(0, BIN_TOP_MODEL_COUNT)
+      .map((model) => model.modelId)
+    selectedByBucket.set(point.bucketStart, ranked)
   }
-  const includedModelValue = topModelIds.reduce((sum, modelId) => sum + (modelTotals.get(modelId) ?? 0), 0)
-  const totalModelValue = rankedModels.reduce((sum, [, value]) => sum + value, 0)
-  const hasOthersBand = totalModelValue - includedModelValue > 0
-
-  const bands: AreaBand[] = layer === "model" && topModelIds.length > 0
+  const bandModelIds = layer === "model" ? globalModelIds : []
+  const bands: AreaBand[] = layer === "model" && bandModelIds.length > 0
     ? [
-        ...topModelIds.map((modelId, index) => ({
+        ...bandModelIds.map((modelId, index) => ({
           key: `model:${modelId}`,
           label: modelId,
           color: MODEL_PALETTE[index % MODEL_PALETTE.length] ?? OTHERS_COLOR,
           value: (point: SeriesPoint) => {
+            if (!selectedByBucket.get(point.bucketStart)?.includes(modelId)) {
+              return 0
+            }
             const bucket = modelBucketMap.get(point.bucketStart)
             const model = bucket?.models.find((candidate) => candidate.modelId === modelId)
             return model ? modelStatValue(model) : 0
           },
         })),
-        ...(hasOthersBand
-          ? [{
-              key: "model:others",
-              label: props.labels.others,
-              color: OTHERS_COLOR,
-              value: (point: SeriesPoint) => {
-                const bucket = modelBucketMap.get(point.bucketStart)
-                const topSum = topModelIds.reduce((sum, modelId) => {
-                  const model = bucket?.models.find((candidate) => candidate.modelId === modelId)
-                  return sum + (model ? modelStatValue(model) : 0)
-                }, 0)
-                return Math.max(0, getStatTotal(point, stat) - topSum)
-              },
-            }]
-          : []),
+        {
+          key: "model:others",
+          label: props.labels.others,
+          color: OTHERS_COLOR,
+          value: (point: SeriesPoint) => {
+            const bucket = modelBucketMap.get(point.bucketStart)
+            const selected = selectedByBucket.get(point.bucketStart) ?? []
+            const selectedSum = selected.reduce((sum, modelId) => {
+              const model = bucket?.models.find((candidate) => candidate.modelId === modelId)
+              return sum + (model ? modelStatValue(model) : 0)
+            }, 0)
+            return Math.max(0, getStatTotal(point, stat) - selectedSum)
+          },
+        },
       ]
     : [
         { key: "input", label: props.labels.input, color: "#4a87b9", value: (point: SeriesPoint) => buildAreaBands(point, stat)[0]?.value ?? 0 },
@@ -687,7 +689,19 @@ export function MainSeriesChart(props: {
 
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const hoveredPoint = hoverIndex == null ? null : chartPoints[hoverIndex]
-  const hoveredBands = hoveredPoint ? bands.map((band) => ({ key: band.key, label: band.label, color: band.color, value: band.value(hoveredPoint) })) : []
+  // Dynamic legend: in model mode the legend reflects the composition of the
+  // reference bucket (the hovered one, or the newest bucket when not hovering),
+  // so models that are zero in that bucket are not listed at all.
+  const legendReferencePoint = hoveredPoint ?? chartPoints.at(-1) ?? null
+  const legendBands = layer === "model" && legendReferencePoint
+    ? bands.filter((band) => band.value(legendReferencePoint) > 0)
+    : bands
+  const hoveredBands = hoveredPoint
+    ? (layer === "model"
+        ? bands.filter((band) => band.value(hoveredPoint) > 0)
+        : bands)
+        .map((band) => ({ key: band.key, label: band.label, color: band.color, value: band.value(hoveredPoint) }))
+    : []
   const hoveredTotal = hoveredPoint ? getStatTotal(hoveredPoint, stat) : 0
 
   function handleChartMouseMove(event: React.MouseEvent<SVGSVGElement>) {
@@ -797,7 +811,7 @@ export function MainSeriesChart(props: {
           ) : chartPoints.length === 0 ? (
             <div className="chart-frame chart-frame--empty">
               <div className="chart-panel__legend">
-                {bands.map((band) => (
+                {legendBands.map((band) => (
                   <span key={band.key}><i className="legend-swatch" style={{ background: band.color }} />{band.label}</span>
                 ))}
                 <span className="chart-panel__axis-label">{copy.xAxis}</span>
@@ -819,7 +833,7 @@ export function MainSeriesChart(props: {
           ) : (
             <>
               <div className="chart-panel__legend">
-                {bands.map((band) => (
+                {legendBands.map((band) => (
                   <span key={band.key}><i className="legend-swatch" style={{ background: band.color }} />{band.label}</span>
                 ))}
                 <span className="chart-panel__axis-label">{copy.xAxis}</span>
