@@ -33,6 +33,10 @@ type Dictionary = {
   outputInclReasoning: string
   totalLabel: string
   selectedStat: string
+  layerLabel: string
+  layerUsageType: string
+  layerModel: string
+  others: string
   chartTitle: string
   chartSubtitle: string
   noSeries: string
@@ -148,6 +152,10 @@ const DICTIONARY: Record<DashboardLanguage, Dictionary> = {
     outputInclReasoning: "Output (+ reasoning)",
     totalLabel: "Total",
     selectedStat: "Selected Statistic",
+    layerLabel: "Layer by",
+    layerUsageType: "Usage type",
+    layerModel: "Model",
+    others: "Others",
     chartTitle: "Series Explorer",
     chartSubtitle: "Metric pivots, shell controls, and the insight rail are ready for deeper drilldowns.",
     noSeries: "No series points yet",
@@ -261,6 +269,10 @@ const DICTIONARY: Record<DashboardLanguage, Dictionary> = {
     outputInclReasoning: "输出（含推理）",
     totalLabel: "总计",
     selectedStat: "当前统计",
+    layerLabel: "分层",
+    layerUsageType: "按用量类型",
+    layerModel: "按模型",
+    others: "其他",
     chartTitle: "序列浏览器",
     chartSubtitle: "指标切换、壳层控制与洞察侧栏已经就位，可继续扩展下钻能力。",
     noSeries: "暂时没有序列数据",

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url"
 
 import { calculateUsageCost } from "./cost-engine"
 import { buildObservedPricingCoverageRows } from "./observed-pricing-coverage"
-import { normalizePricingModelKey, rowMatchesPricingModelKey } from "./pricing-identity"
+import { normalizePricingModelKey, providerAgnosticModelKey, providerAgnosticModelLabel, rowMatchesPricingModelKey } from "./pricing-identity"
 import { resolveCanonicalPrice, type PricingResolverRow } from "./pricing-registry"
 import {
   RAW_OPENCODE_MESSAGES_CURSOR_KEY,
@@ -963,6 +963,127 @@ export function buildSeries(
   return {
     granularity,
     metrics,
+    ...(windowBounds.includeMetadata
+      ? {
+          rangeStart: metadataRangeStart,
+          rangeEnd: windowBounds.rangeEnd,
+          windowLabel: windowBounds.label,
+          bucketCount: points.length,
+        }
+      : {}),
+    points,
+  }
+}
+
+export type SeriesModelBreakdown = {
+  modelId: string
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  totalTokens: number
+  totalCostUsd: number | null
+  inputCostUsd: number | null
+  outputCostUsd: number | null
+  reasoningCostUsd: number | null
+  cacheReadCostUsd: number | null
+  cacheWriteCostUsd: number | null
+}
+
+export type SeriesModelBucket = {
+  bucketStart: string
+  date?: string
+  models: SeriesModelBreakdown[]
+}
+
+export function buildSeriesByModel(
+  analyticsDbPath: string,
+  pricingDbPath: string,
+  options: { granularity?: SeriesGranularity; window?: DashboardWindowRange; now?: number } = {},
+) {
+  const priceRows = readPricingRecords(pricingDbPath)
+  const granularity = options.granularity ?? "daily"
+  const now = options.now ?? Math.floor(Date.now() / 1000)
+  const windowBounds = getWindowBounds(options.window, now, "30d")
+  const usageRows = readSeriesUsageAggregates(analyticsDbPath, granularity, windowBounds)
+
+  const buckets = new Map<string, Map<string, SeriesModelBreakdown>>()
+
+  for (const usage of usageRows) {
+    const bucketStart = usage.bucket_start
+    const modelKey = providerAgnosticModelKey(usage.model_id)
+    const bucketModels = buckets.get(bucketStart) ?? new Map<string, SeriesModelBreakdown>()
+    const existing = bucketModels.get(modelKey)
+    const spend = calculateUsageSpend(priceRows, aggregateAsUsage(usage))
+
+    if (existing) {
+      existing.inputTokens += usage.input_tokens
+      existing.outputTokens += usage.output_tokens
+      existing.reasoningTokens += usage.reasoning_tokens
+      existing.cacheReadTokens += usage.cache_read_tokens
+      existing.cacheWriteTokens += usage.cache_write_tokens
+      existing.totalTokens += usage.total_tokens
+      if (spend != null) {
+        existing.totalCostUsd = (existing.totalCostUsd ?? 0) + spend.totalUsd
+        existing.inputCostUsd = (existing.inputCostUsd ?? 0) + spend.inputUsd
+        existing.outputCostUsd = (existing.outputCostUsd ?? 0) + spend.outputUsd
+        existing.reasoningCostUsd = (existing.reasoningCostUsd ?? 0) + spend.reasoningUsd
+        existing.cacheReadCostUsd = (existing.cacheReadCostUsd ?? 0) + spend.cacheReadUsd
+        existing.cacheWriteCostUsd = (existing.cacheWriteCostUsd ?? 0) + spend.cacheWriteUsd
+      }
+    } else {
+      bucketModels.set(modelKey, {
+        modelId: providerAgnosticModelLabel(usage.model_id),
+        inputTokens: usage.input_tokens,
+        outputTokens: usage.output_tokens,
+        reasoningTokens: usage.reasoning_tokens,
+        cacheReadTokens: usage.cache_read_tokens,
+        cacheWriteTokens: usage.cache_write_tokens,
+        totalTokens: usage.total_tokens,
+        totalCostUsd: spend?.totalUsd ?? null,
+        inputCostUsd: spend?.inputUsd ?? null,
+        outputCostUsd: spend?.outputUsd ?? null,
+        reasoningCostUsd: spend?.reasoningUsd ?? null,
+        cacheReadCostUsd: spend?.cacheReadUsd ?? null,
+        cacheWriteCostUsd: spend?.cacheWriteUsd ?? null,
+      })
+    }
+
+    buckets.set(bucketStart, bucketModels)
+  }
+
+  const points: SeriesModelBucket[] = [...buckets.entries()]
+    .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime())
+    .map(([bucketStart, bucketModels]) => {
+      const point: SeriesModelBucket = {
+        bucketStart,
+        models: [...bucketModels.values()]
+          .map((model) => ({
+            ...model,
+            totalCostUsd: model.totalCostUsd == null ? null : roundUsd(model.totalCostUsd),
+            inputCostUsd: model.inputCostUsd == null ? null : roundUsd(model.inputCostUsd),
+            outputCostUsd: model.outputCostUsd == null ? null : roundUsd(model.outputCostUsd),
+            reasoningCostUsd: model.reasoningCostUsd == null ? null : roundUsd(model.reasoningCostUsd),
+            cacheReadCostUsd: model.cacheReadCostUsd == null ? null : roundUsd(model.cacheReadCostUsd),
+            cacheWriteCostUsd: model.cacheWriteCostUsd == null ? null : roundUsd(model.cacheWriteCostUsd),
+          }))
+          .sort((a, b) => b.totalTokens - a.totalTokens || a.modelId.localeCompare(b.modelId)),
+      }
+
+      if (granularity === "daily") {
+        point.date = bucketStart.slice(0, 10)
+      }
+
+      return point
+    })
+
+  const metadataRangeStart = windowBounds.label === "ALL" && points[0]?.bucketStart
+    ? points[0].bucketStart
+    : windowBounds.rangeStart
+
+  return {
+    granularity,
     ...(windowBounds.includeMetadata
       ? {
           rangeStart: metadataRangeStart,

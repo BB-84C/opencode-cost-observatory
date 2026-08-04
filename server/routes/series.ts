@@ -1,6 +1,6 @@
 import { Router } from "express"
 
-import { buildSeries, type SeriesGranularity, type SeriesMetric } from "../services/dashboard-analytics"
+import { buildSeries, buildSeriesByModel, type SeriesGranularity, type SeriesMetric } from "../services/dashboard-analytics"
 import { tryRespondWithAnalyticsBusy } from "../services/sqlite-busy"
 import { parseDashboardWindowQuery } from "../services/window-range"
 import { buildRequestCacheKey, sendJsonWithOptionalCache } from "../utils/response-cache"
@@ -66,6 +66,49 @@ export function seriesRoutes(analyticsDbPath: string, pricingDbPath: string, opt
       sendJsonWithOptionalCache(res, buildRequestCacheKey("series", req), cacheEnabled, () => buildSeries(analyticsDbPath, pricingDbPath, {
         granularity,
         metrics,
+        window: parsedWindow ?? "all",
+      }))
+    } catch (error) {
+      if (tryRespondWithAnalyticsBusy(res, error)) {
+        return
+      }
+      throw error
+    }
+  })
+
+  router.get("/series-models/:granularity", (req, res) => {
+    const granularity = parseGranularity(req.params.granularity)
+    const rawWindow = req.query.window
+
+    if (!granularity) {
+      res.status(400).json({ error: "invalid_series_request" })
+      return
+    }
+
+    if (rawWindow != null && typeof rawWindow !== "string") {
+      res.status(400).json({
+        error: "invalid_window",
+        message: "Window must be a single string value",
+      })
+      return
+    }
+
+    let parsedWindow
+    try {
+      parsedWindow = typeof rawWindow === "string"
+        ? parseDashboardWindowQuery(req.query, new Date(Date.now()))
+        : null
+    } catch (error) {
+      res.status(400).json({
+        error: "invalid_window",
+        message: error instanceof Error ? error.message : "Invalid window",
+      })
+      return
+    }
+
+    try {
+      sendJsonWithOptionalCache(res, buildRequestCacheKey("series-models", req), cacheEnabled, () => buildSeriesByModel(analyticsDbPath, pricingDbPath, {
+        granularity,
         window: parsedWindow ?? "all",
       }))
     } catch (error) {

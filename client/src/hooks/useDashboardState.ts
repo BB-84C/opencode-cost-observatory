@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { authenticateWithLocalhostToken, createPricingRecord, deletePricingRecord, fetchAppSession, fetchBackendControlStatus, fetchBackendDiagnostics, fetchCostLeaderboard, fetchObservedPricingCoverage, fetchOverview, fetchPricingRecords, fetchSeries, fetchSyncStatus, fetchTokenLeaderboard, logoutAppSession, requestRefresh, restartBackendService, startBackendService, updatePricingRecord, type AuthSessionResponse, type BackendControlResponse, type BackendDiagnosticsResponse, type CreatePricingRecordPayload, type DashboardStat, type DashboardWindow, type LeaderboardSession, type LocalhostAuthPayload, type ObservedPricingCoverageRow, type OverviewResponse, type PricingRecordResponse, type RefreshResponse, type SeriesGranularity, type SeriesMetric, type SeriesResponse } from "../api/client"
+import { authenticateWithLocalhostToken, createPricingRecord, deletePricingRecord, fetchAppSession, fetchBackendControlStatus, fetchBackendDiagnostics, fetchCostLeaderboard, fetchObservedPricingCoverage, fetchOverview, fetchPricingRecords, fetchSeries, fetchSeriesByModel, fetchSyncStatus, fetchTokenLeaderboard, logoutAppSession, requestRefresh, restartBackendService, startBackendService, updatePricingRecord, type AuthSessionResponse, type BackendControlResponse, type BackendDiagnosticsResponse, type CreatePricingRecordPayload, type DashboardStat, type DashboardWindow, type LeaderboardSession, type LocalhostAuthPayload, type ObservedPricingCoverageRow, type OverviewResponse, type PricingRecordResponse, type RefreshResponse, type SeriesGranularity, type SeriesMetric, type SeriesModelResponse, type SeriesResponse } from "../api/client"
 import { isRetryableAnalyticsBusyError } from "../lib/dashboard-api-error"
 import { retryAnalyticsBusy } from "../lib/dashboard-retry"
 
@@ -46,6 +46,11 @@ const EMPTY_OVERVIEW: OverviewResponse = {
 const EMPTY_SERIES: SeriesResponse = {
   granularity: "daily",
   metrics: ["inputTokens", "outputTokens", "reasoningTokens", "cacheReadTokens", "cacheWriteTokens", "cost"],
+  points: [],
+}
+
+const EMPTY_MODEL_SERIES: SeriesModelResponse = {
+  granularity: "daily",
   points: [],
 }
 
@@ -246,8 +251,10 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
   const [window, setWindow] = useState<DashboardWindow>({ mode: "preset", preset: "7d" })
   const [granularity, setGranularity] = useState<SeriesGranularity>("daily")
   const [stat, setStat] = useState<DashboardStat>("cost")
+  const [layer, setLayer] = useState<"type" | "model">("type")
   const [overview, setOverview] = useState<OverviewResponse>(EMPTY_OVERVIEW)
   const [series, setSeries] = useState<SeriesResponse>(EMPTY_SERIES)
+  const [modelSeries, setModelSeries] = useState<SeriesModelResponse>(EMPTY_MODEL_SERIES)
   const [syncState, setSyncState] = useState<Record<string, string>>({})
   const [authSession, setAuthSession] = useState<AuthSessionResponse>({ authenticated: false })
   const [backendDiagnostics, setBackendDiagnostics] = useState<BackendDiagnosticsResponse | null>(null)
@@ -290,9 +297,10 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
       setBackendStatus("authenticated")
       setUpdateStatus(null)
 
-      const [overviewResponse, seriesResponse, costLeaderboardResponse, tokenLeaderboardResponse, pricingRecordsResponse, observedCoverageResponse] = await Promise.all([
+      const [overviewResponse, seriesResponse, modelSeriesResponse, costLeaderboardResponse, tokenLeaderboardResponse, pricingRecordsResponse, observedCoverageResponse] = await Promise.all([
         fetchOverview(nextWindow),
         fetchSeries(nextGranularity, nextWindow, ["cost", "inputTokens", "outputTokens", "reasoningTokens", "cacheReadTokens", "cacheWriteTokens"]),
+        fetchSeriesByModel(nextGranularity, nextWindow),
         fetchCostLeaderboard(),
         fetchTokenLeaderboard(),
         fetchPricingRecords(),
@@ -305,6 +313,7 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
 
       setOverview(overviewResponse)
       setSeries(seriesResponse)
+      setModelSeries(modelSeriesResponse)
       setSyncState({})
       setCostLeaderboard(costLeaderboardResponse.sessions)
       setTokenLeaderboard(tokenLeaderboardResponse.sessions)
@@ -325,6 +334,7 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
         setUpdateStatus(null)
         setOverview(EMPTY_OVERVIEW)
         setSeries(EMPTY_SERIES)
+        setModelSeries(EMPTY_MODEL_SERIES)
         setSyncState({})
         setCostLeaderboard([])
         setTokenLeaderboard([])
@@ -347,6 +357,7 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
     if (!authSessionResponse.authenticated) {
       setOverview(EMPTY_OVERVIEW)
       setSeries(EMPTY_SERIES)
+      setModelSeries(EMPTY_MODEL_SERIES)
       setSyncState(diagnosticsResponse.sync?.state ?? {})
       setCostLeaderboard([])
       setTokenLeaderboard([])
@@ -356,9 +367,10 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
       return diagnosticsResponse
     }
 
-    const [overviewResponse, seriesResponse, syncResponse, costLeaderboardResponse, tokenLeaderboardResponse, pricingRecordsResponse, observedCoverageResponse] = await Promise.all([
+    const [overviewResponse, seriesResponse, modelSeriesResponse, syncResponse, costLeaderboardResponse, tokenLeaderboardResponse, pricingRecordsResponse, observedCoverageResponse] = await Promise.all([
       fetchOverview(nextWindow),
       fetchSeries(nextGranularity, nextWindow, ["cost", "inputTokens", "outputTokens", "reasoningTokens", "cacheReadTokens", "cacheWriteTokens"]),
+      fetchSeriesByModel(nextGranularity, nextWindow),
       fetchSyncStatus(),
       fetchCostLeaderboard(),
       fetchTokenLeaderboard(),
@@ -372,6 +384,7 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
 
     setOverview(overviewResponse)
     setSeries(seriesResponse)
+    setModelSeries(modelSeriesResponse)
     setSyncState(syncResponse.state)
     setCostLeaderboard(costLeaderboardResponse.sessions)
     setTokenLeaderboard(tokenLeaderboardResponse.sessions)
@@ -443,6 +456,7 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
     setUpdateStatus(null)
     setOverview(EMPTY_OVERVIEW)
     setSeries(EMPTY_SERIES)
+    setModelSeries(EMPTY_MODEL_SERIES)
     setSyncState({})
     setCostLeaderboard([])
     setTokenLeaderboard([])
@@ -650,8 +664,11 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
     setGranularity,
     stat,
     setStat,
+    layer,
+    setLayer,
     overview,
     series,
+    modelSeries,
     syncState,
     authSession,
     backendStatus,

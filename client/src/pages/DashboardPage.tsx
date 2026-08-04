@@ -136,8 +136,11 @@ export default function DashboardPage() {
     setGranularity,
     stat,
     setStat,
+    layer,
+    setLayer,
     overview,
     series,
+    modelSeries,
     authSession,
     backendStatus,
     backendDiagnostics,
@@ -269,6 +272,7 @@ export default function DashboardPage() {
         <div className="dashboard-main-grid__primary">
           <MainSeriesChart
             points={series.points}
+            modelPoints={modelSeries.points}
             metadata={{
               rangeStart: series.rangeStart,
               rangeEnd: series.rangeEnd,
@@ -285,6 +289,8 @@ export default function DashboardPage() {
             locale={locale}
             stat={stat}
             onStatChange={setStat}
+            layer={layer}
+            onLayerChange={setLayer}
             priceCoverage={overview.priceCoverage}
             pricingRecords={pricingRecords}
             pricingCoverageGaps={overview.pricingCoverageGaps}
@@ -301,10 +307,12 @@ export default function DashboardPage() {
               cacheRead: copy.cacheRead,
               cacheWrite: copy.cacheWrite,
               totalLabel: copy.totalLabel,
-              insightRail: copy.insightRail,
-              latestBucket: copy.latestBucket,
-              peakValue: copy.peakValue,
               selectedStat: copy.selectedStat,
+              layerLabel: copy.layerLabel,
+              layerUsageType: copy.layerUsageType,
+              layerModel: copy.layerModel,
+              others: copy.others,
+              insightRail: copy.insightRail,
               anomalyAlerts: copy.anomalyAlerts,
               topModelShare: copy.topModelShare,
               pricingIssues: copy.pricingIssues,

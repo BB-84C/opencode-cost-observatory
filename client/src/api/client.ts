@@ -58,6 +58,37 @@ export type SeriesResponse = {
   points: SeriesPoint[]
 }
 
+export type SeriesModelBreakdown = {
+  modelId: string
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  totalTokens: number
+  totalCostUsd: number | null
+  inputCostUsd: number | null
+  outputCostUsd: number | null
+  reasoningCostUsd: number | null
+  cacheReadCostUsd: number | null
+  cacheWriteCostUsd: number | null
+}
+
+export type SeriesModelBucket = {
+  bucketStart: string
+  date?: string
+  models: SeriesModelBreakdown[]
+}
+
+export type SeriesModelResponse = {
+  granularity: SeriesGranularity
+  rangeStart?: string
+  rangeEnd?: string
+  windowLabel?: string
+  bucketCount?: number
+  points: SeriesModelBucket[]
+}
+
 export type SyncStatusResponse = {
   state: Record<string, string>
 }
@@ -304,6 +335,16 @@ export async function fetchSeries(
   windowSelectionToQuery(window).forEach((value, key) => params.set(key, value))
 
   return await readJson<SeriesResponse>(`/api/series/${granularity}?${params.toString()}`)
+}
+
+export async function fetchSeriesByModel(
+  granularity: SeriesGranularity,
+  window: DashboardWindow,
+) {
+  const params = new URLSearchParams()
+  windowSelectionToQuery(window).forEach((value, key) => params.set(key, value))
+
+  return await readJson<SeriesModelResponse>(`/api/series-models/${granularity}?${params.toString()}`)
 }
 
 export async function fetchSyncStatus() {

@@ -5,7 +5,7 @@ import path from "node:path"
 import { performance } from "node:perf_hooks"
 import test from "node:test"
 
-import { buildCostSessionLeaderboard, buildOverview, buildSeries, buildTokenSessionLeaderboard, readObservedPricingCoverage } from "./dashboard-analytics"
+import { buildCostSessionLeaderboard, buildOverview, buildSeries, buildSeriesByModel, buildTokenSessionLeaderboard, readObservedPricingCoverage } from "./dashboard-analytics"
 import { bootstrapAnalyticsDb, openAnalyticsDb } from "../storage/db"
 import { openPricingDb } from "../storage/pricing-db"
 import { message_usage_fact, sync_state } from "../storage/schema.sql"
@@ -319,6 +319,45 @@ test("buildSeries and leaderboards preserve aggregate spend and token shapes", (
 
   const tokenLeaderboard = buildTokenSessionLeaderboard(analyticsDbPath, pricingDbPath, 1)
   assert.equal(tokenLeaderboard.sessions[0].sessionId, "s-a")
+})
+
+test("buildSeriesByModel merges the same model across providers into one band", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "oco-series-model-"))
+  const analyticsDbPath = path.join(root, "analytics.db")
+  const pricingDbPath = path.join(root, "pricing.db")
+  const now = Date.UTC(2026, 0, 3, 12, 0, 0) / 1000
+
+  bootstrapAnalyticsDb(analyticsDbPath)
+  insertPricingRecord(pricingDbPath, now)
+  const analyticsDb = openAnalyticsDb(analyticsDbPath)
+
+  try {
+    analyticsDb.insert(message_usage_fact).values([
+      { message_id: "m-1", session_id: "s-a", project_id: "p-1", parent_message_id: null, provider_id: "openai", model_id: "gpt-5.4", time_created: Date.UTC(2026, 0, 2, 2, 0, 0), input_tokens: 1_000_000, output_tokens: 0, reasoning_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, total_tokens: 1_000_000 },
+      { message_id: "m-2", session_id: "s-a", project_id: "p-1", parent_message_id: null, provider_id: "gauge-forge-openai", model_id: "gpt-5.4", time_created: Date.UTC(2026, 0, 2, 5, 0, 0), input_tokens: 2_000_000, output_tokens: 0, reasoning_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, total_tokens: 2_000_000 },
+      { message_id: "m-3", session_id: "s-b", project_id: "p-1", parent_message_id: null, provider_id: "gauge-forge-anthropic", model_id: "claude-opus-5", time_created: Date.UTC(2026, 0, 2, 7, 0, 0), input_tokens: 500_000, output_tokens: 0, reasoning_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, total_tokens: 500_000 },
+      { message_id: "m-4", session_id: "s-c", project_id: "p-1", parent_message_id: null, provider_id: "openrouter", model_id: "openrouter/anthropic/claude-opus-5", time_created: Date.UTC(2026, 0, 3, 5, 0, 0), input_tokens: 250_000, output_tokens: 0, reasoning_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, total_tokens: 250_000 },
+    ]).run()
+  } finally {
+    analyticsDb.sqlite.close()
+  }
+
+  const series = buildSeriesByModel(analyticsDbPath, pricingDbPath, { granularity: "daily", window: "7d", now })
+
+  assert.equal(series.points.length, 2)
+
+  const jan2 = series.points[0]
+  assert.equal(jan2?.models.length, 2)
+  const gpt = jan2?.models.find((model) => model.modelId === "gpt-5.4")
+  assert.deepEqual({ tokens: gpt?.totalTokens, cost: gpt?.totalCostUsd }, { tokens: 3_000_000, cost: 7.5 })
+  const claude = jan2?.models.find((model) => model.modelId === "claude-opus-5")
+  assert.deepEqual({ tokens: claude?.totalTokens, cost: claude?.totalCostUsd }, { tokens: 500_000, cost: null })
+
+  const jan3 = series.points[1]
+  assert.equal(jan3?.models.length, 1)
+  const claudeJan3 = jan3?.models[0]
+  assert.equal(claudeJan3?.modelId, "claude-opus-5")
+  assert.equal(claudeJan3?.totalTokens, 250_000)
 })
 
 test("readObservedPricingCoverage returns observed wrapper identity with canonical provenance", () => {

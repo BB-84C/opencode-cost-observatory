@@ -1,6 +1,6 @@
 import { useState } from "react"
 
-import type { DashboardStat, PricingCoverageGap, PricingRecordResponse, SeriesPoint } from "../api/client"
+import type { DashboardStat, PricingCoverageGap, PricingRecordResponse, SeriesModelBucket, SeriesPoint } from "../api/client"
 import type { DashboardWindow } from "../hooks/useDashboardState"
 import { CollapsiblePanel } from "./CollapsiblePanel"
 import { TimeControls } from "./TimeControls"
@@ -14,7 +14,9 @@ type ChartMetadata = {
   bucketCount?: number
 }
 
-export type AreaBandKey = "input" | "output" | "cacheRead" | "cacheWrite"
+export type LayerMode = "type" | "model"
+
+export type AreaBandKey = "input" | "output" | "cacheRead" | "cacheWrite" | string
 
 export type AreaBand = {
   key: AreaBandKey
@@ -416,6 +418,7 @@ function buildAreaBands(point: SeriesPoint, stat: DashboardStat): Array<{ key: A
 
 export function MainSeriesChart(props: {
   points: SeriesPoint[]
+  modelPoints?: SeriesModelBucket[]
   metadata?: ChartMetadata
   window?: DashboardWindow
   onWindowChange?: (value: DashboardWindow) => void
@@ -427,6 +430,8 @@ export function MainSeriesChart(props: {
   locale?: Intl.LocalesArgument
   stat: DashboardStat
   onStatChange: (stat: DashboardStat) => void
+  layer: LayerMode
+  onLayerChange: (layer: LayerMode) => void
   priceCoverage?: number
   pricingRecords?: Array<Pick<PricingRecordResponse, "enabled" | "canonicalModel">>
   pricingCoverageGaps?: PricingCoverageGap[]
@@ -443,10 +448,12 @@ export function MainSeriesChart(props: {
     cacheRead: string
     cacheWrite: string
     totalLabel: string
-    insightRail: string
-    latestBucket: string
-    peakValue: string
     selectedStat: string
+    layerLabel: string
+    layerUsageType: string
+    layerModel: string
+    others: string
+    insightRail: string
     anomalyAlerts: string
     topModelShare: string
     pricingIssues: string
@@ -558,19 +565,67 @@ export function MainSeriesChart(props: {
 
   const loadingLabel = props.loadingLabel ?? (isChineseLocale(locale) ? "加载中" : "Loading")
 
-  const bands: AreaBand[] = [
-    { key: "input", label: props.labels.input, color: "#4a87b9", value: (point) => buildAreaBands(point, stat).find((band) => band.key === "input")?.value ?? 0 },
-    { key: "output", label: props.labels.outputInclReasoning, color: "#f958aa", value: (point) => buildAreaBands(point, stat).find((band) => band.key === "output")?.value ?? 0 },
-    { key: "cacheRead", label: props.labels.cacheRead, color: "#42b879", value: (point) => buildAreaBands(point, stat).find((band) => band.key === "cacheRead")?.value ?? 0 },
-    { key: "cacheWrite", label: props.labels.cacheWrite, color: "#ff7437", value: (point) => buildAreaBands(point, stat).find((band) => band.key === "cacheWrite")?.value ?? 0 },
-  ]
+  const MODEL_PALETTE = ["#f958aa", "#42b879", "#ff7437", "#910091", "#9bcd24", "#00b89c", "#ff5b43", "#4a87b9", "#d562d5", "#48a86e"]
+  const OTHERS_COLOR = "#8a94a6"
+  const TOP_MODEL_COUNT = 8
+  const layer = props.layer
+  const modelBucketMap = new Map<string, SeriesModelBucket>()
+  for (const bucket of props.modelPoints ?? []) {
+    modelBucketMap.set(bucket.bucketStart, bucket)
+  }
+  const modelStatValue = (model: { totalTokens: number; totalCostUsd: number | null }) => stat === "cost" ? (model.totalCostUsd ?? 0) : model.totalTokens
+  const modelTotals = new Map<string, number>()
+  for (const point of chartPoints) {
+    const bucket = modelBucketMap.get(point.bucketStart)
+    if (!bucket) {
+      continue
+    }
+    for (const model of bucket.models) {
+      modelTotals.set(model.modelId, (modelTotals.get(model.modelId) ?? 0) + modelStatValue(model))
+    }
+  }
+  const rankedModels = [...modelTotals.entries()].sort((a, b) => b[1] - a[1])
+  const topModelIds = rankedModels.slice(0, TOP_MODEL_COUNT).map(([modelId]) => modelId)
+  const modelBandColor = new Map(topModelIds.map((modelId, index) => [modelId, MODEL_PALETTE[index % MODEL_PALETTE.length]]))
+
+  const bands: AreaBand[] = layer === "model" && topModelIds.length > 0
+    ? [
+        ...topModelIds.map((modelId, index) => ({
+          key: `model:${modelId}`,
+          label: modelId,
+          color: MODEL_PALETTE[index % MODEL_PALETTE.length] ?? OTHERS_COLOR,
+          value: (point: SeriesPoint) => {
+            const bucket = modelBucketMap.get(point.bucketStart)
+            const model = bucket?.models.find((candidate) => candidate.modelId === modelId)
+            return model ? modelStatValue(model) : 0
+          },
+        })),
+        {
+          key: "model:others",
+          label: props.labels.others,
+          color: OTHERS_COLOR,
+          value: (point: SeriesPoint) => {
+            const bucket = modelBucketMap.get(point.bucketStart)
+            const topSum = topModelIds.reduce((sum, modelId) => {
+              const model = bucket?.models.find((candidate) => candidate.modelId === modelId)
+              return sum + (model ? modelStatValue(model) : 0)
+            }, 0)
+            return Math.max(0, getStatTotal(point, stat) - topSum)
+          },
+        },
+      ]
+    : [
+        { key: "input", label: props.labels.input, color: "#4a87b9", value: (point: SeriesPoint) => buildAreaBands(point, stat)[0]?.value ?? 0 },
+        { key: "output", label: props.labels.outputInclReasoning, color: "#f958aa", value: (point: SeriesPoint) => buildAreaBands(point, stat)[1]?.value ?? 0 },
+        { key: "cacheRead", label: props.labels.cacheRead, color: "#42b879", value: (point: SeriesPoint) => buildAreaBands(point, stat)[2]?.value ?? 0 },
+        { key: "cacheWrite", label: props.labels.cacheWrite, color: "#ff7437", value: (point: SeriesPoint) => buildAreaBands(point, stat)[3]?.value ?? 0 },
+      ]
 
   const bandCumulative = chartPoints.map((point) => {
-    const values = buildAreaBands(point, stat)
     const cumulative: number[] = []
     let running = 0
-    for (const band of values) {
-      running += band.value
+    for (const band of bands) {
+      running += band.value(point)
       cumulative.push(running)
     }
     return cumulative
@@ -608,7 +663,7 @@ export function MainSeriesChart(props: {
 
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const hoveredPoint = hoverIndex == null ? null : chartPoints[hoverIndex]
-  const hoveredBands = hoveredPoint ? buildAreaBands(hoveredPoint, stat) : []
+  const hoveredBands = hoveredPoint ? bands.map((band) => ({ key: band.key, label: band.label, color: band.color, value: band.value(hoveredPoint) })) : []
   const hoveredTotal = hoveredPoint ? getStatTotal(hoveredPoint, stat) : 0
 
   function handleChartMouseMove(event: React.MouseEvent<SVGSVGElement>) {
@@ -689,6 +744,26 @@ export function MainSeriesChart(props: {
         </div>
       </div>
 
+      <div className="chart-panel__metric-row chart-panel__metric-row--layer">
+        <span className="control-group__title">{props.labels.layerLabel}</span>
+        <div className="control-group__buttons">
+          {([
+            ["type", props.labels.layerUsageType],
+            ["model", props.labels.layerModel],
+          ] as Array<[LayerMode, string]>).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={`pill-button${layer === value ? " pill-button--active" : ""}`}
+              aria-pressed={layer === value}
+              onClick={() => props.onLayerChange(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="chart-panel__layout">
         <div>
           {props.isLoading ? (
@@ -733,10 +808,10 @@ export function MainSeriesChart(props: {
                     <div className="chart-tooltip" style={{ left: `${tooltipLeftPercent()}%` }} role="status" aria-live="polite">
                       <div className="chart-tooltip__date">{formatBucketLabel(hoveredPoint, granularity, locale, showYear)}</div>
                       <div className="chart-tooltip__rows">
-                        {hoveredBands.map((band, index) => (
+                        {hoveredBands.map((band) => (
                           <div key={band.key} className="chart-tooltip__row">
-                            <i className="legend-swatch" style={{ background: bands[index]?.color ?? "#fff" }} />
-                            <span>{bands[index]?.label ?? band.key}</span>
+                            <i className="legend-swatch" style={{ background: band.color }} />
+                            <span>{band.label}</span>
                             <strong>{formatStatValue(band.value, stat, locale)}</strong>
                           </div>
                         ))}
