@@ -565,9 +565,10 @@ export function MainSeriesChart(props: {
 
   const loadingLabel = props.loadingLabel ?? (isChineseLocale(locale) ? "加载中" : "Loading")
 
-  const MODEL_PALETTE = ["#f958aa", "#42b879", "#ff7437", "#910091", "#9bcd24", "#00b89c", "#ff5b43", "#4a87b9", "#d562d5", "#48a86e"]
+  const MODEL_PALETTE = ["#f958aa", "#42b879", "#ff7437", "#910091", "#9bcd24", "#00b89c", "#ff5b43", "#4a87b9", "#d562d5", "#48a86e", "#e8a33d", "#6b7fd7", "#37b6a3", "#d14c6a", "#7a9e3f", "#b8860b"]
   const OTHERS_COLOR = "#8a94a6"
-  const TOP_MODEL_COUNT = 8
+  const MODEL_MIN_SHARE = 0.01
+  const MAX_MODEL_BANDS = 12
   const layer = props.layer
   const modelBucketMap = new Map<string, SeriesModelBucket>()
   for (const bucket of props.modelPoints ?? []) {
@@ -575,6 +576,8 @@ export function MainSeriesChart(props: {
   }
   const modelStatValue = (model: { totalTokens: number; totalCostUsd: number | null }) => stat === "cost" ? (model.totalCostUsd ?? 0) : model.totalTokens
   const modelTotals = new Map<string, number>()
+  const modelTokenTotals = new Map<string, number>()
+  const modelCostTotals = new Map<string, number>()
   for (const point of chartPoints) {
     const bucket = modelBucketMap.get(point.bucketStart)
     if (!bucket) {
@@ -582,11 +585,30 @@ export function MainSeriesChart(props: {
     }
     for (const model of bucket.models) {
       modelTotals.set(model.modelId, (modelTotals.get(model.modelId) ?? 0) + modelStatValue(model))
+      modelTokenTotals.set(model.modelId, (modelTokenTotals.get(model.modelId) ?? 0) + model.totalTokens)
+      modelCostTotals.set(model.modelId, (modelCostTotals.get(model.modelId) ?? 0) + (model.totalCostUsd ?? 0))
     }
   }
   const rankedModels = [...modelTotals.entries()].sort((a, b) => b[1] - a[1])
-  const topModelIds = rankedModels.slice(0, TOP_MODEL_COUNT).map(([modelId]) => modelId)
-  const modelBandColor = new Map(topModelIds.map((modelId, index) => [modelId, MODEL_PALETTE[index % MODEL_PALETTE.length]]))
+  const totalTokenValue = [...modelTokenTotals.values()].reduce((sum, value) => sum + value, 0)
+  const totalCostValue = [...modelCostTotals.values()].reduce((sum, value) => sum + value, 0)
+  // A model earns its own band by presence: at least 1% of window tokens OR 1% of window cost.
+  // Band heights still reflect the selected stat; "Others" only holds the genuine tail.
+  const topModelIds: string[] = []
+  for (const [modelId] of rankedModels) {
+    if (topModelIds.length >= MAX_MODEL_BANDS) {
+      break
+    }
+    const tokenShare = totalTokenValue > 0 ? (modelTokenTotals.get(modelId) ?? 0) / totalTokenValue : 0
+    const costShare = totalCostValue > 0 ? (modelCostTotals.get(modelId) ?? 0) / totalCostValue : 0
+    if (tokenShare < MODEL_MIN_SHARE && costShare < MODEL_MIN_SHARE) {
+      continue
+    }
+    topModelIds.push(modelId)
+  }
+  const includedModelValue = topModelIds.reduce((sum, modelId) => sum + (modelTotals.get(modelId) ?? 0), 0)
+  const totalModelValue = rankedModels.reduce((sum, [, value]) => sum + value, 0)
+  const hasOthersBand = totalModelValue - includedModelValue > 0
 
   const bands: AreaBand[] = layer === "model" && topModelIds.length > 0
     ? [
@@ -600,19 +622,21 @@ export function MainSeriesChart(props: {
             return model ? modelStatValue(model) : 0
           },
         })),
-        {
-          key: "model:others",
-          label: props.labels.others,
-          color: OTHERS_COLOR,
-          value: (point: SeriesPoint) => {
-            const bucket = modelBucketMap.get(point.bucketStart)
-            const topSum = topModelIds.reduce((sum, modelId) => {
-              const model = bucket?.models.find((candidate) => candidate.modelId === modelId)
-              return sum + (model ? modelStatValue(model) : 0)
-            }, 0)
-            return Math.max(0, getStatTotal(point, stat) - topSum)
-          },
-        },
+        ...(hasOthersBand
+          ? [{
+              key: "model:others",
+              label: props.labels.others,
+              color: OTHERS_COLOR,
+              value: (point: SeriesPoint) => {
+                const bucket = modelBucketMap.get(point.bucketStart)
+                const topSum = topModelIds.reduce((sum, modelId) => {
+                  const model = bucket?.models.find((candidate) => candidate.modelId === modelId)
+                  return sum + (model ? modelStatValue(model) : 0)
+                }, 0)
+                return Math.max(0, getStatTotal(point, stat) - topSum)
+              },
+            }]
+          : []),
       ]
     : [
         { key: "input", label: props.labels.input, color: "#4a87b9", value: (point: SeriesPoint) => buildAreaBands(point, stat)[0]?.value ?? 0 },
