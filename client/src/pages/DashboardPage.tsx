@@ -134,11 +134,10 @@ export default function DashboardPage() {
     setWindow,
     granularity,
     setGranularity,
-    metric,
-    setMetric,
+    stat,
+    setStat,
     overview,
     series,
-    syncState,
     authSession,
     backendStatus,
     backendDiagnostics,
@@ -186,7 +185,6 @@ export default function DashboardPage() {
     runningLabel: copy.refreshing,
     locale,
   })
-  const lastSyncEpochSeconds = Number(syncState.last_sync_time ?? syncState.raw_opencode_messages_cursor ?? syncState.raw_opencode_sessions_cursor ?? Number.NaN)
   const diagnosticLagSeconds = backendDiagnostics?.sync?.lagSeconds ?? overview.syncLagSeconds
   const backendHealthLabel = backendStatus === "offline" ? copy.backendOffline : copy.backendOnline
   return (
@@ -245,30 +243,23 @@ export default function DashboardPage() {
 
       <HeroCards
         overview={overview}
-        trendPoints={series.points.map((point) => point.totalCostUsd ?? 0).slice(-8)}
+        trendPoints={series.points}
         activeAlerts={activeAlerts}
         activeAlertItems={activeAlertItems}
         isLoading={isLoading}
-        lastSyncEpochSeconds={Number.isFinite(lastSyncEpochSeconds) ? lastSyncEpochSeconds : null}
         locale={locale}
         labels={{
           lifetimeSpend: copy.lifetimeSpend,
-          windowSpend: copy.windowSpend,
-          activeAlerts: copy.activeAlerts,
-          priceCoverage: copy.priceCoverage,
-          syncLag: copy.syncLag,
           totalTokens: copy.totalTokens,
+          windowTokens: copy.windowTokens,
+          activeAlerts: copy.activeAlerts,
           never: copy.never,
           secondsShort: copy.secondsShort,
           minutesShort: copy.minutesShort,
           hoursShort: copy.hoursShort,
           daysShort: copy.daysShort,
-          thirtyDayWindow: copy.thirtyDayWindow,
-          synced: copy.synced,
-          lastSync: copy.lastSync,
           trendStrip: copy.trendStrip,
           percentOfLifetime: copy.percentOfLifetime,
-          investigateSignals: copy.investigateSignals,
           noWarnings: copy.noWarnings,
           selectedWindowBadge: formatWindowBadge(window, copy),
         }}
@@ -284,7 +275,6 @@ export default function DashboardPage() {
               windowLabel: series.windowLabel ?? formatWindowBadge(window, copy),
               bucketCount: series.bucketCount,
             }}
-            availableMetrics={series.metrics}
             window={window}
             onWindowChange={setWindow}
             selectedWindowSummary={formatWindowSummary(window, granularityLabel, copy)}
@@ -293,8 +283,8 @@ export default function DashboardPage() {
             isLoading={isLoading}
             loadingLabel={copy.loading}
             locale={locale}
-            metric={metric}
-            onMetricChange={setMetric}
+            stat={stat}
+            onStatChange={setStat}
             priceCoverage={overview.priceCoverage}
             pricingRecords={pricingRecords}
             pricingCoverageGaps={overview.pricingCoverageGaps}
@@ -303,17 +293,18 @@ export default function DashboardPage() {
               chartTitle: copy.chartTitle,
               chartSubtitle: copy.chartSubtitle,
               noSeries: copy.noSeries,
+              statLabel: copy.statLabel,
               cost: copy.cost,
+              tokens: copy.tokens,
               input: copy.input,
-              output: copy.output,
-              reasoning: copy.reasoning,
+              outputInclReasoning: copy.outputInclReasoning,
               cacheRead: copy.cacheRead,
               cacheWrite: copy.cacheWrite,
-              metricLabel: copy.metricLabel,
+              totalLabel: copy.totalLabel,
               insightRail: copy.insightRail,
               latestBucket: copy.latestBucket,
               peakValue: copy.peakValue,
-              selectedMetric: copy.selectedMetric,
+              selectedStat: copy.selectedStat,
               anomalyAlerts: copy.anomalyAlerts,
               topModelShare: copy.topModelShare,
               pricingIssues: copy.pricingIssues,
@@ -325,7 +316,6 @@ export default function DashboardPage() {
                 endDate: copy.endDate,
                 invalidCustomWindow: copy.invalidCustomWindow,
                 granularityLabel: copy.granularityLabel,
-                metricLabel: copy.metricLabel,
                 oneHour: copy.oneHour,
                 twentyFourHours: copy.twentyFourHours,
                 sevenDaysShort: copy.sevenDaysShort,
@@ -336,12 +326,6 @@ export default function DashboardPage() {
                 daily: copy.daily,
                 weekly: copy.weekly,
                 monthly: copy.monthly,
-                cost: copy.cost,
-                input: copy.input,
-                output: copy.output,
-                reasoning: copy.reasoning,
-                cacheRead: copy.cacheRead,
-                cacheWrite: copy.cacheWrite,
               },
             }}
           />

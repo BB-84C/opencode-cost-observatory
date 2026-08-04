@@ -1,4 +1,6 @@
-import type { PricingCoverageGap, PricingRecordResponse, SeriesMetric, SeriesPoint } from "../api/client"
+import { useState } from "react"
+
+import type { DashboardStat, PricingCoverageGap, PricingRecordResponse, SeriesPoint } from "../api/client"
 import type { DashboardWindow } from "../hooks/useDashboardState"
 import { CollapsiblePanel } from "./CollapsiblePanel"
 import { TimeControls } from "./TimeControls"
@@ -10,6 +12,15 @@ type ChartMetadata = {
   rangeEnd?: string
   windowLabel?: string
   bucketCount?: number
+}
+
+export type AreaBandKey = "input" | "output" | "cacheRead" | "cacheWrite"
+
+export type AreaBand = {
+  key: AreaBandKey
+  label: string
+  color: string
+  value: (point: SeriesPoint) => number
 }
 
 function formatUsd(value: number | null | undefined, locale?: Intl.LocalesArgument) {
@@ -58,24 +69,6 @@ export function formatBucketLabel(point: SeriesPoint, granularity: ChartGranular
         day: "numeric",
       }).format(date)
   }
-}
-
-function formatIsoDate(value: string | undefined, locale?: Intl.LocalesArgument) {
-  if (!value) {
-    return "--"
-  }
-
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-
-  return new Intl.DateTimeFormat(locale, {
-    timeZone: "UTC",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date)
 }
 
 function formatRangeIsoDate(value: string | undefined) {
@@ -172,21 +165,16 @@ function buildXAxisTicks(
   return ticks
 }
 
-function getMetricValue(point: SeriesPoint, metric: SeriesMetric) {
-  switch (metric) {
-    case "cost":
-      return point.totalCostUsd
-    case "inputTokens":
-      return point.inputTokens ?? 0
-    case "outputTokens":
-      return point.outputTokens ?? 0
-    case "reasoningTokens":
-      return point.reasoningTokens ?? 0
-    case "cacheReadTokens":
-      return point.cacheReadTokens ?? 0
-    case "cacheWriteTokens":
-      return point.cacheWriteTokens ?? 0
+function getStatTotal(point: SeriesPoint, stat: DashboardStat) {
+  if (stat === "cost") {
+    return point.totalCostUsd ?? 0
   }
+
+  return (point.inputTokens ?? 0)
+    + (point.outputTokens ?? 0)
+    + (point.reasoningTokens ?? 0)
+    + (point.cacheReadTokens ?? 0)
+    + (point.cacheWriteTokens ?? 0)
 }
 
 function hasAnyBucketActivity(point: SeriesPoint) {
@@ -221,13 +209,9 @@ function getBucketActivityHeat(activity: number, maxActivity: number) {
   }
 }
 
-function formatMetricValue(value: number | null, metric: SeriesMetric, locale?: Intl.LocalesArgument) {
-  if (metric === "cost") {
+function formatStatValue(value: number, stat: DashboardStat, locale?: Intl.LocalesArgument) {
+  if (stat === "cost") {
     return formatUsd(value, locale)
-  }
-
-  if (value == null) {
-    return "--"
   }
 
   return new Intl.NumberFormat(locale, {
@@ -236,21 +220,21 @@ function formatMetricValue(value: number | null, metric: SeriesMetric, locale?: 
   }).format(value)
 }
 
-function unitForMetric(metric: SeriesMetric, locale?: Intl.LocalesArgument) {
-  if (metric === "cost") {
+function unitForStat(stat: DashboardStat, locale?: Intl.LocalesArgument) {
+  if (stat === "cost") {
     return isChineseLocale(locale) ? "美元" : "USD"
   }
 
   return isChineseLocale(locale) ? "令牌" : "tokens"
 }
 
-function zeroValueNote(point: SeriesPoint, metricValue: number, locale?: Intl.LocalesArgument) {
-  if (metricValue !== 0) {
+function zeroValueNote(point: SeriesPoint, value: number, stat: DashboardStat, locale?: Intl.LocalesArgument) {
+  if (value !== 0) {
     return ""
   }
 
   if (hasAnyBucketActivity(point)) {
-    return isChineseLocale(locale) ? "当前指标为 0" : "0 selected metric"
+    return isChineseLocale(locale) ? "当前统计为 0" : "0 selected stat"
   }
 
   return isChineseLocale(locale) ? "无活动" : "No activity"
@@ -321,13 +305,13 @@ function formatPercent(value: number | null | undefined, locale?: Intl.LocalesAr
   }).format(value)
 }
 
-function sumMetric(points: SeriesPoint[], metric: SeriesMetric) {
-  return points.reduce((sum, point) => sum + (getMetricValue(point, metric) ?? 0), 0)
+function sumStat(points: SeriesPoint[], stat: DashboardStat) {
+  return points.reduce((sum, point) => sum + getStatTotal(point, stat), 0)
 }
 
-function buildSpikeDiagnostics(points: SeriesPoint[], metric: SeriesMetric, granularity: ChartGranularity, locale?: Intl.LocalesArgument) {
+function buildSpikeDiagnostics(points: SeriesPoint[], stat: DashboardStat, granularity: ChartGranularity, locale?: Intl.LocalesArgument) {
   const values = points
-    .map((point) => ({ point, value: getMetricValue(point, metric) ?? 0 }))
+    .map((point) => ({ point, value: getStatTotal(point, stat) }))
     .filter((entry) => entry.value > 0)
   const sortedValues = values.map((entry) => entry.value).sort((a, b) => a - b)
   const median = sortedValues.length === 0
@@ -347,9 +331,9 @@ function buildSpikeDiagnostics(points: SeriesPoint[], metric: SeriesMetric, gran
       count: spikes.length,
       summary: spikes.length > 0 ? `${spikes.length} 个尖峰` : copy.noActiveSpikes,
       description: spikes.length > 0
-        ? `检测到 ${spikes.length} 个桶高于基线 ${formatMetricValue(median, metric, locale)} 的 3 倍。`
-        : `${points.length} 个桶中未发现高于基线 3 倍的${unitForMetric(metric, locale)}尖峰。`,
-      rows: spikes.map((entry) => `${formatBucketLabel(entry.point, granularity, locale, true)} · ${formatMetricValue(entry.value, metric, locale)}`),
+        ? `检测到 ${spikes.length} 个桶高于基线 ${formatStatValue(median, stat, locale)} 的 3 倍。`
+        : `${points.length} 个桶中未发现高于基线 3 倍的${unitForStat(stat, locale)}尖峰。`,
+      rows: spikes.map((entry) => `${formatBucketLabel(entry.point, granularity, locale, true)} · ${formatStatValue(entry.value, stat, locale)}`),
     }
   }
 
@@ -357,9 +341,9 @@ function buildSpikeDiagnostics(points: SeriesPoint[], metric: SeriesMetric, gran
     count: spikes.length,
     summary: spikes.length > 0 ? `${spikes.length} ${spikes.length === 1 ? "spike" : "spikes"}` : chartCopy(locale).noActiveSpikes,
     description: spikes.length > 0
-      ? `${spikes.length} buckets are above 3x the ${formatMetricValue(median, metric, locale)} baseline.`
-      : points.length === 0 ? "No buckets exceed the selected-metric baseline." : `${points.length} buckets do not exceed 3x the selected-metric baseline.`,
-    rows: spikes.map((entry) => `${formatBucketLabel(entry.point, granularity, locale, true)} · ${formatMetricValue(entry.value, metric, locale)}`),
+      ? `${spikes.length} buckets are above 3x the ${formatStatValue(median, stat, locale)} baseline.`
+      : points.length === 0 ? "No buckets exceed the selected-stat baseline." : `${points.length} buckets do not exceed 3x the selected-stat baseline.`,
+    rows: spikes.map((entry) => `${formatBucketLabel(entry.point, granularity, locale, true)} · ${formatStatValue(entry.value, stat, locale)}`),
   }
 }
 
@@ -412,10 +396,27 @@ function bucketOverlapsRange(point: SeriesPoint, granularity: ChartGranularity, 
   return end.getTime() >= rangeStartMs && start.getTime() <= rangeEndMs
 }
 
+function buildAreaBands(point: SeriesPoint, stat: DashboardStat): Array<{ key: AreaBandKey; value: number }> {
+  if (stat === "cost") {
+    return [
+      { key: "input", value: point.inputCostUsd ?? 0 },
+      { key: "output", value: (point.outputCostUsd ?? 0) + (point.reasoningCostUsd ?? 0) },
+      { key: "cacheRead", value: point.cacheReadCostUsd ?? 0 },
+      { key: "cacheWrite", value: point.cacheWriteCostUsd ?? 0 },
+    ]
+  }
+
+  return [
+    { key: "input", value: point.inputTokens ?? 0 },
+    { key: "output", value: (point.outputTokens ?? 0) + (point.reasoningTokens ?? 0) },
+    { key: "cacheRead", value: point.cacheReadTokens ?? 0 },
+    { key: "cacheWrite", value: point.cacheWriteTokens ?? 0 },
+  ]
+}
+
 export function MainSeriesChart(props: {
   points: SeriesPoint[]
   metadata?: ChartMetadata
-  availableMetrics?: SeriesMetric[]
   window?: DashboardWindow
   onWindowChange?: (value: DashboardWindow) => void
   selectedWindowSummary?: string
@@ -424,8 +425,8 @@ export function MainSeriesChart(props: {
   isLoading?: boolean
   loadingLabel?: string
   locale?: Intl.LocalesArgument
-  metric: SeriesMetric
-  onMetricChange: (metric: SeriesMetric) => void
+  stat: DashboardStat
+  onStatChange: (stat: DashboardStat) => void
   priceCoverage?: number
   pricingRecords?: Array<Pick<PricingRecordResponse, "enabled" | "canonicalModel">>
   pricingCoverageGaps?: PricingCoverageGap[]
@@ -434,17 +435,18 @@ export function MainSeriesChart(props: {
     chartTitle: string
     chartSubtitle: string
     noSeries: string
+    statLabel: string
     cost: string
+    tokens: string
     input: string
-    output: string
-    reasoning: string
+    outputInclReasoning: string
     cacheRead: string
-    cacheWrite?: string
-    metricLabel: string
+    cacheWrite: string
+    totalLabel: string
     insightRail: string
     latestBucket: string
     peakValue: string
-    selectedMetric: string
+    selectedStat: string
     anomalyAlerts: string
     topModelShare: string
     pricingIssues: string
@@ -456,7 +458,6 @@ export function MainSeriesChart(props: {
       endDate: string
       invalidCustomWindow: string
       granularityLabel: string
-      metricLabel: string
       oneHour: string
       twentyFourHours: string
       sevenDaysShort: string
@@ -467,17 +468,10 @@ export function MainSeriesChart(props: {
       daily: string
       weekly: string
       monthly: string
-      cost: string
-      input: string
-      output: string
-      reasoning: string
-      cacheRead: string
-      cacheWrite?: string
     }
   }
 }) {
-  const { points, granularity, locale, metric } = props
-  const availableMetrics = props.availableMetrics ?? ["cost", "inputTokens", "outputTokens", "reasoningTokens", "cacheReadTokens", "cacheWriteTokens"]
+  const { points, granularity, locale, stat } = props
   const metadata = props.metadata
   const rangeStartMs = metadata?.rangeStart ? new Date(metadata.rangeStart).getTime() : Number.NEGATIVE_INFINITY
   const rangeEndMs = metadata?.rangeEnd ? new Date(metadata.rangeEnd).getTime() : Number.POSITIVE_INFINITY
@@ -489,34 +483,26 @@ export function MainSeriesChart(props: {
   const displayMetadata = metadata?.windowLabel === "ALL" && isUnixEpochRangeStart(metadata.rangeStart) && chartPoints[0]?.bucketStart
     ? { ...metadata, rangeStart: chartPoints[0].bucketStart }
     : metadata
-  const metricOptions: Array<{ value: SeriesMetric; label: string }> = [
+  const statOptions: Array<{ value: DashboardStat; label: string }> = [
     { value: "cost", label: props.labels.cost },
-    { value: "inputTokens", label: props.labels.input },
-    { value: "outputTokens", label: props.labels.output },
-    { value: "reasoningTokens", label: props.labels.reasoning },
-    { value: "cacheReadTokens", label: props.labels.cacheRead },
-    { value: "cacheWriteTokens", label: props.labels.cacheWrite ?? (isChineseLocale(locale) ? "缓存写入" : "Cache write tokens") },
-  ].filter((option): option is { value: SeriesMetric; label: string } => availableMetrics.includes(option.value as SeriesMetric))
-  const metricValues = chartPoints.map((point) => getMetricValue(point, metric))
-  const numericMetricValues = metricValues.filter((value): value is number => value != null)
-  const maxMetricValue = Math.max(...numericMetricValues, metric === "cost" ? 0.000001 : 1)
-  const latestPoint = chartPoints.at(-1) ?? null
-  const peakValue = numericMetricValues.length > 0 ? Math.max(...numericMetricValues) : 0
-  const barWidth = chartPoints.length <= 1 ? 28 : Math.max(4, Math.min(28, Math.floor(480 / chartPoints.length)))
-  const selectedMetricLabel = metricOptions.find((option) => option.value === metric)?.label ?? props.labels.selectedMetric
+    { value: "tokens", label: props.labels.tokens },
+  ]
+  const statTotals = chartPoints.map((point) => getStatTotal(point, stat))
+  const maxStatValue = Math.max(...statTotals, stat === "cost" ? 0.000001 : 1)
+  const selectedStatLabel = statOptions.find((option) => option.value === stat)?.label ?? props.labels.selectedStat
   const windowLabel = metadata?.windowLabel ?? props.labels.chartSubtitle
   const displayWindowLabel = isChineseLocale(locale)
     ? ({ "24H": "24小时", "7D": "7天", "30D": "30天", "90D": "90天", ALL: "全部" }[windowLabel] ?? windowLabel)
     : windowLabel
   const copy = chartCopy(locale)
-  const chartTitle = `${selectedMetricLabel} · ${displayWindowLabel} · ${granularityLabel(granularity, locale)}`
-  const unitLabel = unitForMetric(metric, locale)
+  const chartTitle = `${selectedStatLabel} · ${displayWindowLabel} · ${granularityLabel(granularity, locale)}`
+  const unitLabel = unitForStat(stat, locale)
   const bucketCount = metadata?.bucketCount ?? chartPoints.length
   const rangeLabel = `${copy.range}: ${formatRangeIsoDate(displayMetadata?.rangeStart)} → ${formatRangeIsoDate(displayMetadata?.rangeEnd)}`
   const showYear = Boolean(displayMetadata?.rangeStart || displayMetadata?.rangeEnd)
-  const yAxisTicks = [1, 2 / 3, 1 / 3, 0].map((ratio) => ratio * maxMetricValue)
+  const yAxisTicks = [1, 2 / 3, 1 / 3, 0].map((ratio) => ratio * maxStatValue)
   const plot = { left: 56, right: 600, top: 24, bottom: 156 }
-  const xRange = { left: plot.left + barWidth / 2, right: plot.right - barWidth / 2 }
+  const xRange = { left: plot.left, right: plot.right }
   const explicitRangeStartMs = displayMetadata?.rangeStart ? new Date(displayMetadata.rangeStart).getTime() : Number.NaN
   const explicitRangeEndMs = displayMetadata?.rangeEnd ? new Date(displayMetadata.rangeEnd).getTime() : Number.NaN
   const firstBucketStartMs = chartPoints[0]?.bucketStart ? new Date(chartPoints[0].bucketStart).getTime() : Number.NaN
@@ -536,10 +522,10 @@ export function MainSeriesChart(props: {
     const ratio = Math.min(1, Math.max(0, (scaledMs - timeScaleStartMs) / (timeScaleEndMs - timeScaleStartMs)))
     return xRange.left + (ratio * (xRange.right - xRange.left))
   }
-  const yForValue = (value: number) => plot.bottom - ((value / maxMetricValue) * (plot.bottom - plot.top))
+  const yForValue = (value: number) => plot.bottom - ((value / maxStatValue) * (plot.bottom - plot.top))
   const footerPoints = chartPoints
-  const spikeDiagnostics = buildSpikeDiagnostics(chartPoints, metric, granularity, locale)
-  const selectedTotal = sumMetric(chartPoints, metric)
+  const spikeDiagnostics = buildSpikeDiagnostics(chartPoints, stat, granularity, locale)
+  const selectedTotal = sumStat(chartPoints, stat)
   const tokenTotal = chartPoints.reduce((sum, point) => sum
     + getBucketTokenActivity(point), 0)
   const maxBucketTokenActivity = Math.max(0, ...chartPoints.map(getBucketTokenActivity))
@@ -564,29 +550,111 @@ export function MainSeriesChart(props: {
       ? `Lifetime price coverage is ${formatPercent(coverage, locale)} with ${activePricingRecords} enabled pricing records; add missing model prices or refresh the registry.`
       : `Lifetime price coverage is ${formatPercent(coverage, locale)} with ${activePricingRecords} enabled pricing records available for costing.`
   const windowOverviewSummary = isChineseLocale(locale)
-    ? `${chartPoints.length === 0 ? "空窗口" : `${chartPoints.length} 个桶`} · ${formatMetricValue(selectedTotal, metric, locale)} ${unitLabel}`
-    : `${chartPoints.length === 0 ? "Empty window" : `${chartPoints.length} buckets`} · ${formatMetricValue(selectedTotal, metric, locale)} ${unitLabel}`
+    ? `${chartPoints.length === 0 ? "空窗口" : `${chartPoints.length} 个桶`} · ${formatStatValue(selectedTotal, stat, locale)} ${unitLabel}`
+    : `${chartPoints.length === 0 ? "Empty window" : `${chartPoints.length} buckets`} · ${formatStatValue(selectedTotal, stat, locale)} ${unitLabel}`
   const windowOverviewDescription = isChineseLocale(locale)
-    ? `所选窗口包含 ${chartPoints.length} 个${granularityLabel(granularity, locale)}桶，累计 ${formatMetricValue(selectedTotal, metric, locale)} ${unitLabel}，总令牌活动 ${new Intl.NumberFormat(locale).format(tokenTotal)}。`
-    : `Selected window includes ${chartPoints.length} ${granularityLabel(granularity, locale).toLowerCase()} buckets totaling ${formatMetricValue(selectedTotal, metric, locale)} ${unitLabel}, with ${new Intl.NumberFormat(locale).format(tokenTotal)} total token activity.`
+    ? `所选窗口包含 ${chartPoints.length} 个${granularityLabel(granularity, locale)}桶，累计 ${formatStatValue(selectedTotal, stat, locale)} ${unitLabel}，总令牌活动 ${new Intl.NumberFormat(locale).format(tokenTotal)}。`
+    : `Selected window includes ${chartPoints.length} ${granularityLabel(granularity, locale).toLowerCase()} buckets totaling ${formatStatValue(selectedTotal, stat, locale)} ${unitLabel}, with ${new Intl.NumberFormat(locale).format(tokenTotal)} total token activity.`
 
   const loadingLabel = props.loadingLabel ?? (isChineseLocale(locale) ? "加载中" : "Loading")
 
-  const seriesPolyline = buildPolyline(chartPoints.map((point, index) => ({
-    x: xForPoint(point, index),
-    y: yForValue(getMetricValue(point, metric) ?? 0),
-  })))
+  const bands: AreaBand[] = [
+    { key: "input", label: props.labels.input, color: "#4a87b9", value: (point) => buildAreaBands(point, stat).find((band) => band.key === "input")?.value ?? 0 },
+    { key: "output", label: props.labels.outputInclReasoning, color: "#f958aa", value: (point) => buildAreaBands(point, stat).find((band) => band.key === "output")?.value ?? 0 },
+    { key: "cacheRead", label: props.labels.cacheRead, color: "#42b879", value: (point) => buildAreaBands(point, stat).find((band) => band.key === "cacheRead")?.value ?? 0 },
+    { key: "cacheWrite", label: props.labels.cacheWrite, color: "#ff7437", value: (point) => buildAreaBands(point, stat).find((band) => band.key === "cacheWrite")?.value ?? 0 },
+  ]
+
+  const bandCumulative = chartPoints.map((point) => {
+    const values = buildAreaBands(point, stat)
+    const cumulative: number[] = []
+    let running = 0
+    for (const band of values) {
+      running += band.value
+      cumulative.push(running)
+    }
+    return cumulative
+  })
+
+  const bandPaths = bands.map((band, bandIndex) => {
+    const topEdge = chartPoints.map((point, index) => {
+      const cumulative = bandCumulative[index] ?? []
+      return `${xForPoint(point, index)},${yForValue(cumulative[bandIndex] ?? 0)}`
+    })
+    const bottomEdge = chartPoints.map((point, index) => {
+      const cumulative = bandCumulative[index] ?? []
+      const previous = bandIndex === 0 ? 0 : (cumulative[bandIndex - 1] ?? 0)
+      return `${xForPoint(point, index)},${yForValue(previous)}`
+    }).reverse()
+
+    return {
+      band,
+      path: `M ${topEdge.join(" L ")} L ${bottomEdge.join(" L ")} Z`,
+    }
+  })
+
+  const totalOutline = buildPolyline(chartPoints.map((point, index) => {
+    const cumulative = bandCumulative[index] ?? []
+    return {
+      x: xForPoint(point, index),
+      y: yForValue(cumulative.at(-1) ?? 0),
+    }
+  }))
+
   const xAxisTicks = buildXAxisTicks(chartPoints.length, (index) => {
     const point = chartPoints[index]
     return point ? xForPoint(point, index) : plot.left
   }, plot)
+
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
+  const hoveredPoint = hoverIndex == null ? null : chartPoints[hoverIndex]
+  const hoveredBands = hoveredPoint ? buildAreaBands(hoveredPoint, stat) : []
+  const hoveredTotal = hoveredPoint ? getStatTotal(hoveredPoint, stat) : 0
+
+  function handleChartMouseMove(event: React.MouseEvent<SVGSVGElement>) {
+    if (chartPoints.length === 0) {
+      return
+    }
+
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const ratio = (event.clientX - bounds.left) / bounds.width
+    const chartX = ratio * 600
+    let nearestIndex = 0
+    let nearestDistance = Number.POSITIVE_INFINITY
+
+    for (let index = 0; index < chartPoints.length; index += 1) {
+      const point = chartPoints[index]
+      if (!point) {
+        continue
+      }
+      const distance = Math.abs(xForPoint(point, index) - chartX)
+      if (distance < nearestDistance) {
+        nearestDistance = distance
+        nearestIndex = index
+      }
+    }
+
+    setHoverIndex(nearestIndex)
+  }
+
+  function tooltipLeftPercent() {
+    if (hoverIndex == null) {
+      return 0
+    }
+    const point = chartPoints[hoverIndex]
+    if (!point) {
+      return 0
+    }
+    const x = xForPoint(point, hoverIndex)
+    return clamp((x / 600) * 100, 12, 62)
+  }
 
   return (
     <section className="chart-panel" aria-label={props.labels.chartTitle} aria-busy={props.isLoading || undefined}>
       <header className="chart-panel__header">
         <div>
           <p className="chart-panel__eyebrow">{props.labels.series}</p>
-          <h2>{props.isLoading && props.selectedWindowSummary ? `${selectedMetricLabel} · ${props.selectedWindowSummary}` : chartTitle}</h2>
+          <h2>{props.isLoading && props.selectedWindowSummary ? `${selectedStatLabel} · ${props.selectedWindowSummary}` : chartTitle}</h2>
         </div>
         <p className="chart-panel__subtitle">{rangeLabel} · {bucketCount} {copy.buckets} · {copy.unit}: {unitLabel}</p>
       </header>
@@ -596,26 +664,24 @@ export function MainSeriesChart(props: {
           <TimeControls
             window={props.window}
             granularity={granularity}
-            metric={metric}
             selectedWindowSummary={props.selectedWindowSummary ?? chartTitle}
             onWindowChange={props.onWindowChange}
             onGranularityChange={props.onGranularityChange}
-            onMetricChange={props.onMetricChange}
             labels={props.labels.controls}
           />
         </div>
       ) : null}
 
       <div className="chart-panel__metric-row">
-        <span className="control-group__title">{props.labels.metricLabel}</span>
+        <span className="control-group__title">{props.labels.statLabel}</span>
         <div className="control-group__buttons">
-          {metricOptions.map((option) => (
+          {statOptions.map((option) => (
             <button
               key={option.value}
               type="button"
-              className={`pill-button${metric === option.value ? " pill-button--active" : ""}`}
-              aria-pressed={metric === option.value}
-              onClick={() => props.onMetricChange(option.value)}
+              className={`pill-button${stat === option.value ? " pill-button--active" : ""}`}
+              aria-pressed={stat === option.value}
+              onClick={() => props.onStatChange(option.value)}
             >
               {option.label}
             </button>
@@ -632,7 +698,9 @@ export function MainSeriesChart(props: {
           ) : chartPoints.length === 0 ? (
             <div className="chart-frame chart-frame--empty">
               <div className="chart-panel__legend">
-                <span><i className="legend-swatch legend-swatch--cost" />{selectedMetricLabel}</span>
+                {bands.map((band) => (
+                  <span key={band.key}><i className="legend-swatch" style={{ background: band.color }} />{band.label}</span>
+                ))}
                 <span className="chart-panel__axis-label">{copy.xAxis}</span>
                 <span className="chart-panel__axis-label">{`${copy.yAxis}: ${unitLabel}`}</span>
               </div>
@@ -642,7 +710,7 @@ export function MainSeriesChart(props: {
                   <g key={line}>
                     <line x1="56" x2="600" y1={24 + line * 40} y2={24 + line * 40} className="chart-grid-line" />
                     <text x="48" y={28 + line * 40} textAnchor="end" className="chart-y-tick-label">
-                      {formatMetricValue(0, metric, locale)}
+                      {formatStatValue(0, stat, locale)}
                     </text>
                   </g>
                 ))}
@@ -652,72 +720,89 @@ export function MainSeriesChart(props: {
           ) : (
             <>
               <div className="chart-panel__legend">
-                <span><i className="legend-swatch legend-swatch--cost" />{selectedMetricLabel}</span>
+                {bands.map((band) => (
+                  <span key={band.key}><i className="legend-swatch" style={{ background: band.color }} />{band.label}</span>
+                ))}
                 <span className="chart-panel__axis-label">{copy.xAxis}</span>
                 <span className="chart-panel__axis-label">{`${copy.yAxis}: ${unitLabel}`}</span>
               </div>
 
-              <div className="chart-frame">
-                <svg viewBox="0 0 600 180" className="chart-svg" role="img" aria-label={`${chartTitle}. ${rangeLabel}. ${copy.yAxis}: ${unitLabel}. ${copy.xAxis}.`}>
-                  <desc>{`${chartTitle}. ${rangeLabel}. ${copy.yAxis}: ${unitLabel}. ${copy.xAxis}.`}</desc>
-                  {[0, 1, 2, 3].map((line) => (
-                    <g key={line}>
-                      <line
-                        x1="56"
-                        x2="600"
-                        y1={24 + line * 40}
-                        y2={24 + line * 40}
-                        className="chart-grid-line"
-                      />
-                      <text x="48" y={28 + line * 40} textAnchor="end" className="chart-y-tick-label">
-                        {formatMetricValue(yAxisTicks[line] ?? 0, metric, locale)}
-                      </text>
-                    </g>
-                  ))}
-                  {chartPoints.map((point, index) => {
-                    const x = xForPoint(point, index)
-                    const metricValue = getMetricValue(point, metric)
-                    if (metricValue == null) {
-                      return null
-                    }
-                    const metricHeight = plot.bottom - yForValue(metricValue)
-                    const zeroNote = zeroValueNote(point, metricValue, locale)
-                    return (
-                      <rect
-                        key={point.bucketStart}
-                        x={x - barWidth / 2}
-                        y={plot.bottom - metricHeight}
-                        width={barWidth}
-                        height={Math.max(4, metricHeight)}
-                        rx="8"
-                        className={`chart-token-bar${metricValue === 0 ? " chart-token-bar--zero" : ""}`}
-                      >
-                        <title>{`${formatBucketRange(point, granularity, displayMetadata)} · ${formatMetricValue(metricValue, metric, locale)}${zeroNote ? ` · ${zeroNote}` : ""}`}</title>
-                      </rect>
-                    )
-                  })}
-                  <polyline className="chart-spend-line" fill="none" points={seriesPolyline} />
-                  <line x1={plot.left} x2={plot.right} y1={plot.bottom} y2={plot.bottom} className="chart-x-axis-line" />
-                  {xAxisTicks.map((tick) => {
-                    const point = chartPoints[tick.index]
-                    if (!point) {
-                      return null
-                    }
-                    return (
-                      <g key={`x-tick-${point.bucketStart}`}>
-                        <line x1={tick.x} x2={tick.x} y1={plot.bottom} y2={plot.bottom + 5} className="chart-x-axis-line" />
-                        <text
-                          x={tick.x}
-                          y={plot.bottom + 18}
-                          textAnchor={tick.textAnchor}
-                          className={`chart-x-tick-label${tick.textAnchor === "middle" ? " chart-x-tick-label--optional" : ""}`}
-                        >
-                          {formatBucketLabel(point, granularity, locale, showYear)}
+              <div className="chart-frame chart-frame--interactive">
+                <div className="chart-tooltip-anchor">
+                  {hoveredPoint ? (
+                    <div className="chart-tooltip" style={{ left: `${tooltipLeftPercent()}%` }} role="status" aria-live="polite">
+                      <div className="chart-tooltip__date">{formatBucketLabel(hoveredPoint, granularity, locale, showYear)}</div>
+                      <div className="chart-tooltip__rows">
+                        {hoveredBands.map((band, index) => (
+                          <div key={band.key} className="chart-tooltip__row">
+                            <i className="legend-swatch" style={{ background: bands[index]?.color ?? "#fff" }} />
+                            <span>{bands[index]?.label ?? band.key}</span>
+                            <strong>{formatStatValue(band.value, stat, locale)}</strong>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="chart-tooltip__total">
+                        <span>{props.labels.totalLabel}</span>
+                        <strong>{formatStatValue(hoveredTotal, stat, locale)}</strong>
+                      </div>
+                    </div>
+                  ) : null}
+                  <svg
+                    viewBox="0 0 600 180"
+                    className="chart-svg"
+                    role="img"
+                    aria-label={`${chartTitle}. ${rangeLabel}. ${copy.yAxis}: ${unitLabel}. ${copy.xAxis}.`}
+                    onMouseMove={handleChartMouseMove}
+                    onMouseLeave={() => setHoverIndex(null)}
+                  >
+                    <desc>{`${chartTitle}. ${rangeLabel}. ${copy.yAxis}: ${unitLabel}. ${copy.xAxis}.`}</desc>
+                    {[0, 1, 2, 3].map((line) => (
+                      <g key={line}>
+                        <line
+                          x1="56"
+                          x2="600"
+                          y1={24 + line * 40}
+                          y2={24 + line * 40}
+                          className="chart-grid-line"
+                        />
+                        <text x="48" y={28 + line * 40} textAnchor="end" className="chart-y-tick-label">
+                          {formatStatValue(yAxisTicks[line] ?? 0, stat, locale)}
                         </text>
                       </g>
-                    )
-                  })}
-                </svg>
+                    ))}
+                    {bandPaths.map(({ band, path }) => (
+                      <path
+                        key={band.key}
+                        d={path}
+                        className="chart-area-band"
+                        style={{ fill: band.color }}
+                      >
+                        <title>{`${band.label} · ${formatStatValue(sumStat(chartPoints, stat), stat, locale)}`}</title>
+                      </path>
+                    ))}
+                    <polyline className="chart-area-outline" fill="none" points={totalOutline} />
+                    <line x1={plot.left} x2={plot.right} y1={plot.bottom} y2={plot.bottom} className="chart-x-axis-line" />
+                    {xAxisTicks.map((tick) => {
+                      const point = chartPoints[tick.index]
+                      if (!point) {
+                        return null
+                      }
+                      return (
+                        <g key={`x-tick-${point.bucketStart}`}>
+                          <line x1={tick.x} x2={tick.x} y1={plot.bottom} y2={plot.bottom + 5} className="chart-x-axis-line" />
+                          <text
+                            x={tick.x}
+                            y={plot.bottom + 18}
+                            textAnchor={tick.textAnchor}
+                            className={`chart-x-tick-label${tick.textAnchor === "middle" ? " chart-x-tick-label--optional" : ""}`}
+                          >
+                            {formatBucketLabel(point, granularity, locale, showYear)}
+                          </text>
+                        </g>
+                      )
+                    })}
+                  </svg>
+                </div>
 
                 <CollapsiblePanel
                   title={copy.details}
@@ -728,20 +813,20 @@ export function MainSeriesChart(props: {
                 >
                   <div className="chart-footer chart-footer--scroll-window" role="region" tabIndex={0} aria-label="Series Explorer details">
                     {footerPoints.map((point) => {
-                      const metricValue = getMetricValue(point, metric) ?? null
-                      const zeroNote = metricValue == null ? "" : zeroValueNote(point, metricValue, locale)
+                      const value = getStatTotal(point, stat)
+                      const zeroNote = zeroValueNote(point, value, stat, locale)
                       const bucketTokenActivity = getBucketTokenActivity(point)
                       const activityHeat = getBucketActivityHeat(bucketTokenActivity, maxBucketTokenActivity)
                       return (
                         <div
                           key={point.bucketStart}
-                          className={`chart-footer__point${metricValue === 0 ? " chart-footer__point--zero" : ""}`}
+                          className={`chart-footer__point${value === 0 ? " chart-footer__point--zero" : ""}`}
                           data-activity-level={activityHeat?.activityLevel}
                           style={activityHeat == null ? undefined : { backgroundColor: `rgba(124, 224, 255, ${activityHeat.activityAlpha})` }}
-                          aria-label={`${formatBucketRange(point, granularity, displayMetadata)} · ${formatMetricValue(metricValue, metric, locale)}${zeroNote ? ` · ${zeroNote}` : ""}`}
+                          aria-label={`${formatBucketRange(point, granularity, displayMetadata)} · ${formatStatValue(value, stat, locale)}${zeroNote ? ` · ${zeroNote}` : ""}`}
                         >
                           <span data-testid="chart-bucket-label">{formatBucketLabel(point, granularity, locale, showYear)}</span>
-                          <strong>{formatMetricValue(metricValue, metric, locale)}</strong>
+                          <strong>{formatStatValue(value, stat, locale)}</strong>
                           {zeroNote ? <small>{zeroNote}</small> : null}
                         </div>
                       )

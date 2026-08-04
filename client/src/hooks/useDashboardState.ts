@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { authenticateWithLocalhostToken, createPricingRecord, deletePricingRecord, fetchAppSession, fetchBackendControlStatus, fetchBackendDiagnostics, fetchCostLeaderboard, fetchObservedPricingCoverage, fetchOverview, fetchPricingRecords, fetchSeries, fetchSyncStatus, fetchTokenLeaderboard, logoutAppSession, requestRefresh, restartBackendService, startBackendService, updatePricingRecord, type AuthSessionResponse, type BackendControlResponse, type BackendDiagnosticsResponse, type CreatePricingRecordPayload, type DashboardWindow, type LeaderboardSession, type LocalhostAuthPayload, type ObservedPricingCoverageRow, type OverviewResponse, type PricingRecordResponse, type RefreshResponse, type SeriesGranularity, type SeriesMetric, type SeriesResponse } from "../api/client"
+import { authenticateWithLocalhostToken, createPricingRecord, deletePricingRecord, fetchAppSession, fetchBackendControlStatus, fetchBackendDiagnostics, fetchCostLeaderboard, fetchObservedPricingCoverage, fetchOverview, fetchPricingRecords, fetchSeries, fetchSyncStatus, fetchTokenLeaderboard, logoutAppSession, requestRefresh, restartBackendService, startBackendService, updatePricingRecord, type AuthSessionResponse, type BackendControlResponse, type BackendDiagnosticsResponse, type CreatePricingRecordPayload, type DashboardStat, type DashboardWindow, type LeaderboardSession, type LocalhostAuthPayload, type ObservedPricingCoverageRow, type OverviewResponse, type PricingRecordResponse, type RefreshResponse, type SeriesGranularity, type SeriesMetric, type SeriesResponse } from "../api/client"
 import { isRetryableAnalyticsBusyError } from "../lib/dashboard-api-error"
 import { retryAnalyticsBusy } from "../lib/dashboard-retry"
 
@@ -36,6 +36,7 @@ export function createRefreshStateTracker() {
 
 const EMPTY_OVERVIEW: OverviewResponse = {
   lifetimeTokens: 0,
+  windowTokens: 0,
   lifetimeSpendUsd: null,
   windowSpendUsd: null,
   priceCoverage: 0,
@@ -242,9 +243,9 @@ export function buildAlertItems(args: { overview: OverviewResponse; pricingRecor
 }
 
 export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
-  const [window, setWindow] = useState<DashboardWindow>({ mode: "preset", preset: "24h" })
+  const [window, setWindow] = useState<DashboardWindow>({ mode: "preset", preset: "7d" })
   const [granularity, setGranularity] = useState<SeriesGranularity>("daily")
-  const [metric, setMetric] = useState<SeriesMetric>("cost")
+  const [stat, setStat] = useState<DashboardStat>("cost")
   const [overview, setOverview] = useState<OverviewResponse>(EMPTY_OVERVIEW)
   const [series, setSeries] = useState<SeriesResponse>(EMPTY_SERIES)
   const [syncState, setSyncState] = useState<Record<string, string>>({})
@@ -647,8 +648,8 @@ export function useDashboardState(locale: Intl.LocalesArgument = "en-US") {
     setWindow,
     granularity: effectiveGranularity,
     setGranularity,
-    metric,
-    setMetric,
+    stat,
+    setStat,
     overview,
     series,
     syncState,

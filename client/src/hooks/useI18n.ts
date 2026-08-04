@@ -28,6 +28,11 @@ type Dictionary = {
   priceCoverage: string
   syncLag: string
   totalTokens: string
+  windowTokens: string
+  statLabel: string
+  outputInclReasoning: string
+  totalLabel: string
+  selectedStat: string
   chartTitle: string
   chartSubtitle: string
   noSeries: string
@@ -138,6 +143,11 @@ const DICTIONARY: Record<DashboardLanguage, Dictionary> = {
     priceCoverage: "Price Coverage",
     syncLag: "Sync Lag",
     totalTokens: "Lifetime Tokens",
+    windowTokens: "Window Tokens",
+    statLabel: "Statistic",
+    outputInclReasoning: "Output (+ reasoning)",
+    totalLabel: "Total",
+    selectedStat: "Selected Statistic",
     chartTitle: "Series Explorer",
     chartSubtitle: "Metric pivots, shell controls, and the insight rail are ready for deeper drilldowns.",
     noSeries: "No series points yet",
@@ -246,6 +256,11 @@ const DICTIONARY: Record<DashboardLanguage, Dictionary> = {
     priceCoverage: "定价覆盖",
     syncLag: "同步延迟",
     totalTokens: "累计令牌",
+    windowTokens: "窗口令牌",
+    statLabel: "统计",
+    outputInclReasoning: "输出（含推理）",
+    totalLabel: "总计",
+    selectedStat: "当前统计",
     chartTitle: "序列浏览器",
     chartSubtitle: "指标切换、壳层控制与洞察侧栏已经就位，可继续扩展下钻能力。",
     noSeries: "暂时没有序列数据",

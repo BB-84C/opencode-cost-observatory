@@ -3,6 +3,7 @@ import { DashboardApiError } from "../lib/dashboard-api-error"
 
 export type OverviewResponse = {
   lifetimeTokens: number
+  windowTokens?: number
   lifetimeSpendUsd: number | null
   windowSpendUsd: number | null
   priceCoverage: number
@@ -27,6 +28,8 @@ export type SeriesGranularity = "hourly" | "daily" | "weekly" | "monthly"
 
 export type SeriesMetric = "inputTokens" | "outputTokens" | "reasoningTokens" | "cacheReadTokens" | "cacheWriteTokens" | "cost"
 
+export type DashboardStat = "cost" | "tokens"
+
 export type SeriesPoint = {
   bucketStart: string
   date?: string
@@ -38,6 +41,11 @@ export type SeriesPoint = {
   pricedTokens?: number
   unpricedTokens?: number
   totalCostUsd?: number | null
+  inputCostUsd?: number | null
+  outputCostUsd?: number | null
+  reasoningCostUsd?: number | null
+  cacheReadCostUsd?: number | null
+  cacheWriteCostUsd?: number | null
 }
 
 export type SeriesResponse = {

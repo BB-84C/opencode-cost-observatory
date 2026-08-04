@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react"
 
-import type { SeriesGranularity, SeriesMetric } from "../api/client"
+import type { SeriesGranularity } from "../api/client"
 import type { DashboardWindow } from "../hooks/useDashboardState"
 import { isValidCustomWindow, type PresetWindow } from "../lib/windowSelection"
 
@@ -43,12 +43,10 @@ function ControlGroup<T extends string>(props: {
 export function TimeControls(props: {
   window: DashboardWindow
   granularity: SeriesGranularity
-  metric: SeriesMetric
   ariaLabel?: string
   selectedWindowSummary: string
   onWindowChange: (value: DashboardWindow) => void
   onGranularityChange: (value: SeriesGranularity) => void
-  onMetricChange: (value: SeriesMetric) => void
   labels: {
     windowLabel: string
     selectedWindow: string
@@ -57,7 +55,6 @@ export function TimeControls(props: {
     endDate: string
     invalidCustomWindow: string
     granularityLabel: string
-    metricLabel: string
     oneHour: string
     twentyFourHours: string
     sevenDaysShort: string
@@ -68,11 +65,6 @@ export function TimeControls(props: {
     daily: string
     weekly: string
     monthly: string
-    cost: string
-    input: string
-    output: string
-    reasoning: string
-    cacheRead: string
   }
 }) {
   const customErrorId = useId()

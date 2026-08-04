@@ -218,9 +218,14 @@ button {
 
 .hero-grid {
   display: grid;
-  grid-template-columns: minmax(220px, 1.9fr) repeat(2, minmax(148px, 0.9fr));
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   gap: 18px;
   margin-top: 28px;
+}
+
+.hero-card--alerts {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, rgba(255, 209, 102, 0.08), rgba(255, 140, 140, 0.05));
 }
 
 .hero-card,
@@ -745,6 +750,92 @@ button {
   stroke-linecap: round;
   stroke-linejoin: round;
   filter: drop-shadow(0 0 10px rgba(124, 224, 255, 0.3));
+}
+
+.chart-area-band {
+  fill-opacity: 0.92;
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 1;
+}
+
+.chart-area-outline {
+  stroke: rgba(255, 255, 255, 0.85);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 6px rgba(124, 224, 255, 0.25));
+}
+
+.chart-frame--interactive {
+  position: relative;
+}
+
+.chart-tooltip-anchor {
+  position: relative;
+}
+
+.chart-tooltip {
+  position: absolute;
+  top: 10px;
+  z-index: 5;
+  min-width: 196px;
+  max-width: 260px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(124, 224, 255, 0.22);
+  background: rgba(7, 16, 25, 0.96);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  transform: translateX(-50%);
+  pointer-events: none;
+  display: grid;
+  gap: 8px;
+}
+
+.chart-tooltip__date {
+  align-self: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #0b1623;
+  font-size: 0.78rem;
+  font-weight: 700;
+  justify-self: start;
+}
+
+.chart-tooltip__rows {
+  display: grid;
+  gap: 5px;
+}
+
+.chart-tooltip__row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.84rem;
+  color: #c7d8ea;
+}
+
+.chart-tooltip__row strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-tooltip__total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(124, 224, 255, 0.18);
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.chart-tooltip__total strong {
+  color: var(--text);
+  font-size: 0.94rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .chart-footer {

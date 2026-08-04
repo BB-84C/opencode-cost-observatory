@@ -824,6 +824,7 @@ export function buildOverview(
 
   return {
     lifetimeTokens,
+    windowTokens,
     pricedTokens,
     unpricedTokens: lifetimeTokens - pricedTokens,
     lifetimeSpendUsd: hasPricedUsage ? roundUsdOrNull(lifetimeSpendUsd) : null,
@@ -861,6 +862,11 @@ export function buildSeries(
     cacheReadTokens: number
     cacheWriteTokens: number
     totalCostUsd: number | null
+    inputCostUsd: number
+    outputCostUsd: number
+    reasoningCostUsd: number
+    cacheReadCostUsd: number
+    cacheWriteCostUsd: number
     pricedTokens: number
     unpricedTokens: number
   }>()
@@ -875,6 +881,11 @@ export function buildSeries(
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
       totalCostUsd: 0,
+      inputCostUsd: 0,
+      outputCostUsd: 0,
+      reasoningCostUsd: 0,
+      cacheReadCostUsd: 0,
+      cacheWriteCostUsd: 0,
       pricedTokens: 0,
       unpricedTokens: 0,
     }
@@ -886,6 +897,11 @@ export function buildSeries(
     bucket.cacheWriteTokens += usage.cache_write_tokens
     if (spend != null) {
       bucket.totalCostUsd = (bucket.totalCostUsd ?? 0) + spend.totalUsd
+      bucket.inputCostUsd += spend.inputUsd
+      bucket.outputCostUsd += spend.outputUsd
+      bucket.reasoningCostUsd += spend.reasoningUsd
+      bucket.cacheReadCostUsd += spend.cacheReadUsd
+      bucket.cacheWriteCostUsd += spend.cacheWriteUsd
       bucket.pricedTokens += usage.total_tokens
     } else {
       bucket.unpricedTokens += usage.total_tokens
@@ -926,6 +942,11 @@ export function buildSeries(
 
       if (includeCost) {
         point.totalCostUsd = bucket.pricedTokens > 0 ? roundUsdOrNull(bucket.totalCostUsd) : null
+        point.inputCostUsd = bucket.pricedTokens > 0 ? roundUsd(bucket.inputCostUsd) : null
+        point.outputCostUsd = bucket.pricedTokens > 0 ? roundUsd(bucket.outputCostUsd) : null
+        point.reasoningCostUsd = bucket.pricedTokens > 0 ? roundUsd(bucket.reasoningCostUsd) : null
+        point.cacheReadCostUsd = bucket.pricedTokens > 0 ? roundUsd(bucket.cacheReadCostUsd) : null
+        point.cacheWriteCostUsd = bucket.pricedTokens > 0 ? roundUsd(bucket.cacheWriteCostUsd) : null
       }
 
       if (bucket.pricedTokens > 0 && bucket.unpricedTokens > 0) {
