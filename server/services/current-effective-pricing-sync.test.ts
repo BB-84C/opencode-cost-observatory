@@ -64,6 +64,7 @@ test("syncCurrentEffectivePricingSeed inserts the complete current seed into an 
   const models = new Map(activeRows.map((row) => [row.id, row]))
   for (const [id, expected] of Object.entries({
     "anthropic:claude-fable-5": { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5, url: "https://claude.com/pricing" },
+    "anthropic:claude-fable-5-1": { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5, url: "https://platform.claude.com/docs/en/about-claude/pricing" },
     "anthropic:claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25, url: "https://claude.com/pricing" },
     "anthropic:claude-opus-4-6": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25, url: "https://claude.com/pricing" },
     "anthropic:claude-opus-5": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25, url: "https://platform.claude.com/docs/en/about-claude/pricing" },

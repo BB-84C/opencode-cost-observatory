@@ -602,6 +602,15 @@ test("ensurePricingRegistryReady seeds current effective rows when no durable or
       cacheWrite: 6.25,
       sourceUrl: "https://platform.claude.com/docs/en/about-claude/pricing",
     },
+    "claude-fable-5-1": {
+      vendor: "anthropic",
+      input: 10,
+      output: 50,
+      reasoning: 0,
+      cacheRead: 0.25,
+      cacheWrite: 12.5,
+      sourceUrl: "https://platform.claude.com/docs/en/about-claude/pricing",
+    },
     "claude-sonnet-5": {
       vendor: "anthropic",
       input: 2,
