@@ -211,7 +211,7 @@ function readActiveLegacyPricingRows(analyticsDbPath: string, now: number) {
 }
 
 function normalizePricingSourceType(value: string): PricingSourceType {
-  return value === "manual" || value === "official" || value === "openrouter" || value === "websearch"
+  return value === "manual" || value === "official" || value === "openrouter" || value === "upstream" || value === "websearch"
     ? value
     : "websearch"
 }

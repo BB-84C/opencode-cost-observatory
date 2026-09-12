@@ -18,6 +18,7 @@ const messageUsageFactSchema = z.object({
   cache_read_tokens: z.number().int(),
   cache_write_tokens: z.number().int(),
   total_tokens: z.number().int(),
+  cost_usd: z.number().nonnegative().optional(),
 })
 
 const sessionTreeEdgeSchema = z.object({
@@ -75,9 +76,10 @@ export function ingestRoutes(analyticsDbPath: string, ingestToken: string) {
       const insertMessage = db.sqlite.prepare(`
         insert into message_usage_fact (
           message_id, session_id, project_id, parent_message_id, provider_id, model_id, time_created,
-          input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, total_tokens
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        on conflict(message_id) do nothing
+          input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, total_tokens, cost_usd
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(message_id) do update set cost_usd = excluded.cost_usd
+        where message_usage_fact.cost_usd <> excluded.cost_usd
       `)
 
       const upsertSession = db.sqlite.prepare(`
@@ -121,6 +123,7 @@ export function ingestRoutes(analyticsDbPath: string, ingestToken: string) {
               message.cache_read_tokens,
               message.cache_write_tokens,
               message.total_tokens,
+              message.cost_usd ?? 0,
             ).changes
           }
 

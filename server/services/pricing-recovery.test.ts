@@ -559,12 +559,21 @@ test("ensurePricingRegistryReady seeds current effective rows when no durable or
   for (const [model, expected] of Object.entries({
     "gpt-5.6-sol": {
       vendor: "openai",
-      input: 5,
-      output: 30,
-      reasoning: 30,
-      cacheRead: 0.5,
-      cacheWrite: 6.25,
+      input: 4,
+      output: 20,
+      reasoning: 20,
+      cacheRead: 0.4,
+      cacheWrite: 5,
       sourceUrl: "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+    },
+    "gpt-6-astra": {
+      vendor: "openai",
+      input: 10,
+      output: 50,
+      reasoning: 50,
+      cacheRead: 1,
+      cacheWrite: 12.5,
+      sourceUrl: "https://developers.openai.com/api/docs/models/gpt-6-astra",
     },
     "gpt-5.6-terra": {
       vendor: "openai",

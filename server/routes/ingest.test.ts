@@ -86,6 +86,58 @@ test("ingest accepts an empty batch", async () => {
   })
 })
 
+test("ingest upserts cost_usd on conflict and leaves other message fields immutable", async () => {
+  await withIngestServer(async (baseUrl, analyticsDbPath) => {
+    const message = {
+      message_id: "message-cost",
+      session_id: "session-1",
+      project_id: "project-1",
+      parent_message_id: null,
+      provider_id: "openai",
+      model_id: "gpt-test",
+      time_created: 1_700_000_000_000,
+      input_tokens: 10,
+      output_tokens: 20,
+      reasoning_tokens: 30,
+      cache_read_tokens: 40,
+      cache_write_tokens: 50,
+      total_tokens: 150,
+    }
+
+    const first = await fetch(`${baseUrl}/ingest`, {
+      method: "POST",
+      headers: { authorization: "Bearer secret-token", "content-type": "application/json" },
+      body: JSON.stringify({ messages: [{ ...message, cost_usd: 1.25 }], sessions: [] }),
+    })
+    assert.equal(first.status, 200)
+    assert.deepEqual(await first.json(), { inserted: { messages: 1, sessions: 0 }, skipped: { messages: 0 } })
+
+    const backfill = await fetch(`${baseUrl}/ingest`, {
+      method: "POST",
+      headers: { authorization: "Bearer secret-token", "content-type": "application/json" },
+      body: JSON.stringify({ messages: [{ ...message, cost_usd: 2.5 }], sessions: [] }),
+    })
+    assert.equal(backfill.status, 200)
+    // SQLite reports UPSERT DO UPDATE rows as changed, so the cost update counts as written, not skipped.
+    assert.deepEqual(await backfill.json(), { inserted: { messages: 1, sessions: 0 }, skipped: { messages: 0 } })
+
+    const sameAgain = await fetch(`${baseUrl}/ingest`, {
+      method: "POST",
+      headers: { authorization: "Bearer secret-token", "content-type": "application/json" },
+      body: JSON.stringify({ messages: [{ ...message, cost_usd: 2.5 }], sessions: [] }),
+    })
+    assert.equal(sameAgain.status, 200)
+
+    const sqlite = await import("better-sqlite3").then(({ default: Database }) => new Database(analyticsDbPath, { readonly: true }))
+    try {
+      const row = sqlite.prepare("select cost_usd, total_tokens from message_usage_fact where message_id = ?").get("message-cost") as { cost_usd: number, total_tokens: number }
+      assert.deepEqual(row, { cost_usd: 2.5, total_tokens: 150 })
+    } finally {
+      sqlite.close()
+    }
+  })
+})
+
 test("ingest atomically upserts valid session and immutable message batches", async () => {
   await withIngestServer(async (baseUrl, analyticsDbPath) => {
     const batch = {

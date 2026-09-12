@@ -28,6 +28,7 @@ export type MessageUsageFactRow = {
   cache_read_tokens: number
   cache_write_tokens: number
   total_tokens: number
+  cost_usd: number
 }
 
 export type SessionTreeEdgeRow = {
@@ -197,7 +198,7 @@ export function readUploadBatch(analyticsDbPath: string, watermark: number, batc
   try {
     const messages = db.sqlite.prepare(`
       select message_id, session_id, project_id, parent_message_id, provider_id, model_id, time_created,
-             input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, total_tokens
+             input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, total_tokens, cost_usd
       from message_usage_fact
       where time_created > ?
       order by time_created asc, message_id asc

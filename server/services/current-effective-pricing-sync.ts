@@ -8,6 +8,7 @@ export type CurrentEffectivePricingSyncResult = {
   updated: number
   unchanged: number
   supersededDuplicates: number
+  upstreamCovered: number
   total: number
 }
 
@@ -106,11 +107,22 @@ export function syncCurrentEffectivePricingSeed(pricingDbPath: string, now = Mat
         updated: 0,
         unchanged: 0,
         supersededDuplicates: 0,
+        upstreamCovered: 0,
         total: drafts.length,
       }
 
       for (const draft of drafts) {
         if (draft.source_type === "official") {
+          const upstream = db.sqlite.prepare(`
+            select 1 from pricing_record
+            where canonical_vendor = ? and canonical_model = ?
+              and source_type = 'upstream' and enabled = 1 and superseded_time is null
+            limit 1
+          `).get(draft.canonical_vendor, draft.canonical_model)
+          if (upstream) {
+            result.upstreamCovered += 1
+            continue
+          }
           result.supersededDuplicates += supersedeActiveIdentityDuplicates(db, draft, now)
         }
 

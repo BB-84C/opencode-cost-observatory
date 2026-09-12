@@ -56,11 +56,13 @@ test("syncCurrentEffectivePricingSeed inserts the complete current seed into an 
     updated: 0,
     unchanged: 0,
     supersededDuplicates: 0,
+    upstreamCovered: 0,
     total: CURRENT_EFFECTIVE_PRICING_SEED.length,
   })
   assert.equal(activeRows.length, CURRENT_EFFECTIVE_PRICING_SEED.length)
   assert.ok(activeRows.some((row) => row.id === "openai:gpt-5.6-terra"))
   assert.ok(activeRows.some((row) => row.id === "anthropic:claude-opus-4-8"))
+  assert.ok(activeRows.some((row) => row.id === "openai:gpt-6-astra"))
   const models = new Map(activeRows.map((row) => [row.id, row]))
   for (const [id, expected] of Object.entries({
     "anthropic:claude-fable-5": { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5, url: "https://claude.com/pricing" },
@@ -68,8 +70,8 @@ test("syncCurrentEffectivePricingSeed inserts the complete current seed into an 
     "anthropic:claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25, url: "https://claude.com/pricing" },
     "anthropic:claude-opus-4-6": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25, url: "https://claude.com/pricing" },
     "anthropic:claude-opus-5": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25, url: "https://platform.claude.com/docs/en/about-claude/pricing" },
-    "deepseek:deepseek-v4-flash": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0, url: "https://api-docs.deepseek.com/quick_start/pricing" },
-    "deepseek:deepseek-v4-pro": { input: 0.435, output: 0.87, cacheRead: 0.003625, cacheWrite: 0, url: "https://api-docs.deepseek.com/quick_start/pricing" },
+    "deepseek:deepseek-v4-flash": { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0, url: "https://api-docs.deepseek.com/quick_start/pricing" },
+    "deepseek:deepseek-v4-pro": { input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0, url: "https://api-docs.deepseek.com/quick_start/pricing" },
   })) {
     const row = models.get(id)
     assert.ok(row, `expected ${id} in current effective pricing seed`)
@@ -144,6 +146,7 @@ test("syncCurrentEffectivePricingSeed archives stale codex-mini, promotes the of
     updated: 1,
     unchanged: 0,
     supersededDuplicates: 0,
+    upstreamCovered: 0,
     total: CURRENT_EFFECTIVE_PRICING_SEED.length,
   })
   assert.deepEqual(activeCodexMini && {
@@ -171,6 +174,7 @@ test("syncCurrentEffectivePricingSeed archives stale codex-mini, promotes the of
     updated: 0,
     unchanged: CURRENT_EFFECTIVE_PRICING_SEED.length,
     supersededDuplicates: 0,
+    upstreamCovered: 0,
     total: CURRENT_EFFECTIVE_PRICING_SEED.length,
   })
   assert.equal(rowsAfterSecond.length, rowsAfterFirst.length)
@@ -223,6 +227,7 @@ test("syncCurrentEffectivePricingSeed supersedes same-identity manual duplicates
     updated: 0,
     unchanged: 0,
     supersededDuplicates: 1,
+    upstreamCovered: 0,
     total: CURRENT_EFFECTIVE_PRICING_SEED.length,
   })
   assert.deepEqual(duplicate && { enabled: duplicate.enabled, supersededTime: duplicate.superseded_time }, { enabled: 0, supersededTime: now })
@@ -235,6 +240,62 @@ test("syncCurrentEffectivePricingSeed supersedes same-identity manual duplicates
     updated: 0,
     unchanged: CURRENT_EFFECTIVE_PRICING_SEED.length,
     supersededDuplicates: 0,
+    upstreamCovered: 0,
     total: CURRENT_EFFECTIVE_PRICING_SEED.length,
   })
+})
+
+test("syncCurrentEffectivePricingSeed skips identities covered by an active upstream row", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "oco-pricing-sync-upstream-"))
+  const pricingDbPath = path.join(root, "pricing.db")
+  const pricingDb = openPricingDb(pricingDbPath)
+  try {
+    pricingDb.insert(pricing_record).values(createPricingRecordDraft({
+      id: "anthropic:claude-opus-4-8",
+      canonicalVendor: "anthropic",
+      canonicalModel: "claude-opus-4-8",
+      vendorModelId: "anthropic/claude-opus-4-8",
+      currency: "USD",
+      inputPrice: 7,
+      outputPrice: 35,
+      reasoningPrice: 0,
+      cacheReadPrice: 0.7,
+      cacheWritePrice: 8.75,
+      sourceType: "upstream",
+      sourceUrl: "https://openrouter.ai/api/v1/models",
+      confidence: "high",
+      isManualOverride: false,
+      effectiveTime: now - 60,
+      observedTime: now - 60,
+      enabled: true,
+    })).run()
+  } finally {
+    pricingDb.sqlite.close()
+  }
+
+  const first = syncCurrentEffectivePricingSeed(pricingDbPath, now)
+  const rows = readPricingRows(pricingDbPath)
+  const upstreamRow = rows.find((row) => row.id === "anthropic:claude-opus-4-8")
+  const officialRows = rows.filter((row) => row.id !== "anthropic:claude-opus-4-8" && row.canonical_model === "claude-opus-4-8")
+
+  assert.deepEqual(first, {
+    inserted: CURRENT_EFFECTIVE_PRICING_SEED.length - 1,
+    updated: 0,
+    unchanged: 0,
+    supersededDuplicates: 0,
+    upstreamCovered: 1,
+    total: CURRENT_EFFECTIVE_PRICING_SEED.length,
+  })
+  assert.deepEqual(upstreamRow && {
+    source_type: upstreamRow.source_type,
+    input_price: upstreamRow.input_price,
+    enabled: upstreamRow.enabled,
+    superseded_time: upstreamRow.superseded_time,
+  }, {
+    source_type: "upstream",
+    input_price: 7,
+    enabled: 1,
+    superseded_time: null,
+  })
+  assert.equal(officialRows.filter((row) => row.enabled === 1).length, 0)
 })

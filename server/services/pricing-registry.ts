@@ -1,4 +1,4 @@
-export type PricingSourceType = "manual" | "official" | "openrouter" | "websearch"
+export type PricingSourceType = "manual" | "official" | "openrouter" | "upstream" | "websearch"
 
 export type ReasoningBillingRuleKind = "per_token" | "included_in_output"
 
@@ -101,10 +101,11 @@ function validateNonNegativePriceDimensions(input: Pick<PricingRecordDraftInput,
 }
 
 const precedenceRank: Record<PricingSourceType, number> = {
-  official: 0,
+  upstream: 0,
   openrouter: 1,
-  websearch: 2,
-  manual: 3,
+  official: 2,
+  websearch: 3,
+  manual: 4,
 }
 
 function normalizeSourceUrl(sourceUrl: string) {

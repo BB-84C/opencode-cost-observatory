@@ -15,6 +15,7 @@ export const message_usage_fact = sqliteTable("message_usage_fact", {
   cache_read_tokens: integer().notNull(),
   cache_write_tokens: integer().notNull(),
   total_tokens: integer().notNull(),
+  cost_usd: real().notNull().default(0),
 })
 
 export const session_tree_edge = sqliteTable("session_tree_edge", {
@@ -58,7 +59,7 @@ export const pricing_record = sqliteTable(
     check("pricing_record_currency_usd", sql`${table.currency} = 'USD'`),
     check(
       "pricing_record_source_type_valid",
-      sql`(${table.source_type} = 'manual' or ${table.source_type} = 'official' or ${table.source_type} = 'openrouter' or ${table.source_type} = 'websearch')`,
+      sql`(${table.source_type} = 'manual' or ${table.source_type} = 'official' or ${table.source_type} = 'openrouter' or ${table.source_type} = 'upstream' or ${table.source_type} = 'websearch')`,
     ),
     check("pricing_record_source_url_non_blank", sql`length(trim(${table.source_url})) > 0`),
     check(
@@ -81,7 +82,7 @@ export const pricing_source_event = sqliteTable(
   (table) => [
     check(
       "pricing_source_event_source_type_valid",
-      sql`(${table.source_type} = 'manual' or ${table.source_type} = 'official' or ${table.source_type} = 'openrouter' or ${table.source_type} = 'websearch')`,
+      sql`(${table.source_type} = 'manual' or ${table.source_type} = 'official' or ${table.source_type} = 'openrouter' or ${table.source_type} = 'upstream' or ${table.source_type} = 'websearch')`,
     ),
     check("pricing_source_event_source_url_non_blank", sql`length(trim(${table.source_url})) > 0`),
   ],
@@ -115,7 +116,8 @@ create table if not exists message_usage_fact (
   reasoning_tokens integer not null,
   cache_read_tokens integer not null,
   cache_write_tokens integer not null,
-  total_tokens integer not null
+  total_tokens integer not null,
+  cost_usd real not null default 0
 );
 
 create index if not exists idx_muf_time_created on message_usage_fact(time_created);
@@ -143,7 +145,7 @@ create table if not exists pricing_record (
   observed_time integer,
   superseded_time integer,
   enabled integer not null,
-  constraint pricing_record_source_type_valid check(source_type = 'manual' or source_type = 'official' or source_type = 'openrouter' or source_type = 'websearch'),
+  constraint pricing_record_source_type_valid check(source_type = 'manual' or source_type = 'official' or source_type = 'openrouter' or source_type = 'upstream' or source_type = 'websearch'),
   constraint pricing_record_source_url_non_blank check(length(trim(source_url)) > 0),
   constraint pricing_record_manual_override_coherent check((source_type = 'manual' and is_manual_override = 1) or (source_type <> 'manual' and is_manual_override = 0))
 );
@@ -155,7 +157,7 @@ create table if not exists pricing_source_event (
   source_url text not null,
   observed_time integer not null,
   payload_json text,
-  constraint pricing_source_event_source_type_valid check(source_type = 'manual' or source_type = 'official' or source_type = 'openrouter' or source_type = 'websearch'),
+  constraint pricing_source_event_source_type_valid check(source_type = 'manual' or source_type = 'official' or source_type = 'openrouter' or source_type = 'upstream' or source_type = 'websearch'),
   constraint pricing_source_event_source_url_non_blank check(length(trim(source_url)) > 0)
 );
 `

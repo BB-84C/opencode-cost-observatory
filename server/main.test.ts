@@ -10,6 +10,8 @@ import type { AppConfig } from "./config"
 import { createServer } from "./main"
 import { createPasskeyService } from "./services/passkey-service"
 
+process.env.OBSERVATORY_DISABLE_UPSTREAM_SYNC = "1"
+
 function closeServer(server: Server) {
   return new Promise<void>((resolve, reject) => {
     server.close((error) => {

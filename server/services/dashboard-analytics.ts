@@ -34,6 +34,7 @@ type UsageFactRow = {
   cache_read_tokens: number
   cache_write_tokens: number
   total_tokens: number
+  cost_usd: number
 }
 
 type UsageAggregateRow = {
@@ -48,6 +49,7 @@ type UsageAggregateRow = {
   cache_read_tokens: number
   cache_write_tokens: number
   total_tokens: number
+  cost_usd: number
 }
 
 type SeriesUsageAggregateRow = UsageAggregateRow & {
@@ -412,6 +414,14 @@ function calculateUsageSpend(priceRows: PricingResolverRow[], usage: UsageSpendI
   )
 }
 
+// Aggregate-level rule: if the (provider, model) group reports any cost, the summed
+// reported cost wins and zero-cost members of the group are not separately registry-priced.
+// The registry fallback applies only when the whole group reports no cost.
+function aggregateSpend(priceRows: PricingResolverRow[], usage: UsageAggregateRow) {
+  if (usage.cost_usd > 0) return { totalUsd: usage.cost_usd, inputUsd: 0, outputUsd: 0, reasoningUsd: 0, cacheReadUsd: 0, cacheWriteUsd: 0 }
+  return calculateUsageSpend(priceRows, aggregateAsUsage(usage))
+}
+
 function usageAggregateSelect() {
   return `
     provider_id,
@@ -424,7 +434,8 @@ function usageAggregateSelect() {
     sum(reasoning_tokens) as reasoning_tokens,
     sum(cache_read_tokens) as cache_read_tokens,
     sum(cache_write_tokens) as cache_write_tokens,
-    sum(total_tokens) as total_tokens
+    sum(total_tokens) as total_tokens,
+    sum(cost_usd) as cost_usd
   `
 }
 
@@ -639,8 +650,8 @@ export function syncRawOpencodeToAnalytics(rawDatabasePath: string, analyticsDat
     const insertMessage = analyticsDb.sqlite.prepare(`
       insert into message_usage_fact (
         message_id, session_id, project_id, parent_message_id, provider_id, model_id, time_created,
-        input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, total_tokens
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, total_tokens, cost_usd
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     let messagesSynced = 0
@@ -677,6 +688,7 @@ export function syncRawOpencodeToAnalytics(rawDatabasePath: string, analyticsDat
           message.cacheReadTokens,
           message.cacheWriteTokens,
           message.totalTokens,
+          message.costUsd,
         )
         messagesSynced += 1
         maxMessageTime = Math.max(maxMessageTime, message.createdAt)
@@ -798,7 +810,7 @@ export function buildOverview(
   for (const aggregate of lifetimeRows) {
     const usage = aggregateAsUsage(aggregate)
     lifetimeTokens += aggregate.total_tokens
-    const spend = calculateUsageSpend(priceRows, usage)
+    const spend = aggregateSpend(priceRows, aggregate)
 
     if (spend != null) {
       lifetimeSpendUsd = (lifetimeSpendUsd ?? 0) + spend.totalUsd
@@ -810,7 +822,7 @@ export function buildOverview(
 
   for (const aggregate of windowRows) {
     windowTokens += aggregate.total_tokens
-    const spend = calculateUsageSpend(priceRows, aggregateAsUsage(aggregate))
+    const spend = aggregateSpend(priceRows, aggregate)
     if (spend != null) {
       windowSpendUsd = (windowSpendUsd ?? 0) + spend.totalUsd
       windowPricedTokens += aggregate.total_tokens
@@ -889,7 +901,7 @@ export function buildSeries(
       pricedTokens: 0,
       unpricedTokens: 0,
     }
-    const spend = calculateUsageSpend(priceRows, aggregateAsUsage(usage))
+    const spend = aggregateSpend(priceRows, usage)
     bucket.inputTokens += usage.input_tokens
     bucket.outputTokens += usage.output_tokens
     bucket.reasoningTokens += usage.reasoning_tokens
@@ -1015,7 +1027,7 @@ export function buildSeriesByModel(
     const modelKey = providerAgnosticModelKey(usage.model_id)
     const bucketModels = buckets.get(bucketStart) ?? new Map<string, SeriesModelBreakdown>()
     const existing = bucketModels.get(modelKey)
-    const spend = calculateUsageSpend(priceRows, aggregateAsUsage(usage))
+    const spend = aggregateSpend(priceRows, usage)
 
     if (existing) {
       existing.inputTokens += usage.input_tokens
@@ -1104,7 +1116,7 @@ function buildSessionLeaderboardRows(analyticsDbPath: string, pricingDbPath: str
   const usageBySession = new Map<string, { sessionId: string; totalTokens: number; totalCostUsd: number | null }>()
 
   for (const usage of usageRows) {
-    const spend = calculateUsageSpend(priceRows, aggregateAsUsage(usage))
+    const spend = aggregateSpend(priceRows, usage)
     const current = usageBySession.get(usage.session_id) ?? {
       sessionId: usage.session_id,
       totalTokens: 0,

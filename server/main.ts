@@ -18,6 +18,7 @@ import { syncRoutes } from "./routes/sync"
 import { queueColdStartAnalyticsRefresh } from "./services/cold-start-sync"
 import { createPasskeyService } from "./services/passkey-service"
 import { ensurePricingRegistryReady } from "./services/pricing-recovery"
+import { syncUpstreamPricing } from "./services/upstream-pricing-sync"
 import { bootstrapAnalyticsDb } from "./storage/db"
 
 function formatHttpHost(host: string) {
@@ -46,6 +47,12 @@ function isSpaHtmlRequest(req: express.Request) {
 export function createServer(_config: AppConfig = loadConfig()) {
   bootstrapAnalyticsDb(_config.analyticsDbPath)
   ensurePricingRegistryReady(_config.analyticsDbPath, _config.pricingDbPath)
+  if (process.env.OBSERVATORY_DISABLE_UPSTREAM_SYNC !== "1") {
+    const sync = () => { void syncUpstreamPricing(_config.pricingDbPath).then((result) => console.log("upstream pricing sync", result)).catch((error) => console.error("upstream pricing sync failed", error)) }
+    sync()
+    const upstreamPricingInterval = setInterval(sync, 24 * 60 * 60 * 1000)
+    upstreamPricingInterval.unref()
+  }
 
   const app = express()
   app.disable("x-powered-by")

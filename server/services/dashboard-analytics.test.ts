@@ -429,3 +429,77 @@ test("readObservedPricingCoverage returns observed wrapper identity with canonic
   assert.equal(rows[0].sourceUrl, "https://developers.openai.com/api/docs/pricing")
   assert.equal(rows[0].resolutionStatus, "priced")
 })
+
+test("buildOverview prefers provider-reported cost_usd over token-derived registry pricing", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "oco-overview-"))
+  const analyticsDbPath = path.join(root, "analytics.db")
+  const pricingDbPath = path.join(root, "pricing.db")
+  const now = 1_746_493_200
+
+  bootstrapAnalyticsDb(analyticsDbPath)
+  const analyticsDb = openAnalyticsDb(analyticsDbPath)
+  insertPricingRecord(pricingDbPath, now, "gpt-5.4")
+  insertPricingRecord(pricingDbPath, now, "gpt-5.5")
+
+  try {
+    // Registry would price this at 1M input tokens * $2.5 = $2.5, but the provider reported $1.75.
+    analyticsDb.insert(message_usage_fact).values({
+      message_id: "m-cost",
+      session_id: "s-cost",
+      project_id: "p-1",
+      parent_message_id: null,
+      provider_id: "gauge-forge-openai",
+      model_id: "gpt-5.4",
+      time_created: now,
+      input_tokens: 1_000_000,
+      output_tokens: 0,
+      reasoning_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      total_tokens: 1_000_000,
+      cost_usd: 1.75,
+    }).run()
+
+    // Zero reported cost falls back to registry: 100k output * $15/1M = $1.5.
+    analyticsDb.insert(message_usage_fact).values({
+      message_id: "m-fallback",
+      session_id: "s-fallback",
+      project_id: "p-1",
+      parent_message_id: null,
+      provider_id: "gauge-forge-openai",
+      model_id: "gpt-5.5",
+      time_created: now,
+      input_tokens: 0,
+      output_tokens: 100_000,
+      reasoning_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      total_tokens: 100_000,
+      cost_usd: 0,
+    }).run()
+
+    // Reported cost with NO registry row is still priced and counted in coverage.
+    analyticsDb.insert(message_usage_fact).values({
+      message_id: "m-unregistered",
+      session_id: "s-unregistered",
+      project_id: "p-1",
+      parent_message_id: null,
+      provider_id: "openrouter",
+      model_id: "vendor-unknown-model",
+      time_created: now,
+      input_tokens: 1_000,
+      output_tokens: 0,
+      reasoning_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      total_tokens: 1_000,
+      cost_usd: 0.05,
+    }).run()
+  } finally {
+    analyticsDb.sqlite.close()
+  }
+
+  const overview = buildOverview(analyticsDbPath, pricingDbPath, now)
+  assert.equal(overview.lifetimeSpendUsd, 1.75 + 1.5 + 0.05)
+  assert.equal(overview.priceCoverage, 1)
+})

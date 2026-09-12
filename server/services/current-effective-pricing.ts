@@ -14,16 +14,18 @@ function includedInOutput(sourceType: SeedRow["sourceType"], sourceUrl: string) 
 
 export const CURRENT_EFFECTIVE_PRICING_SEED: SeedRow[] = [
   {
+    // deepseek-v4-flash is a retired alias served by DeepSeek-V4.1-Flash and billed at the Flash price.
+    // Time-of-day pricing: off-peak shown; peak is 2x (Mon-Fri 01:00-04:00 & 06:00-10:00 UTC).
     id: "deepseek:deepseek-v4-flash",
     canonicalVendor: "deepseek",
     canonicalModel: "deepseek-v4-flash",
     vendorModelId: "deepseek-v4-flash",
     currency: "USD",
-    inputPrice: 0.14,
-    outputPrice: 0.28,
+    inputPrice: 0.15,
+    outputPrice: 0.6,
     reasoningPrice: 0,
     reasoningBillingRule: includedInOutput("official", "https://api-docs.deepseek.com/quick_start/pricing"),
-    cacheReadPrice: 0.0028,
+    cacheReadPrice: 0.003,
     cacheWritePrice: 0,
     sourceType: "official",
     sourceUrl: "https://api-docs.deepseek.com/quick_start/pricing",
@@ -31,16 +33,17 @@ export const CURRENT_EFFECTIVE_PRICING_SEED: SeedRow[] = [
     isManualOverride: false,
   },
   {
+    // Time-of-day pricing: off-peak shown; peak is 2x (Mon-Fri 01:00-04:00 & 06:00-10:00 UTC).
     id: "deepseek:deepseek-v4-pro",
     canonicalVendor: "deepseek",
     canonicalModel: "deepseek-v4-pro",
     vendorModelId: "deepseek-v4-pro",
     currency: "USD",
-    inputPrice: 0.435,
-    outputPrice: 0.87,
+    inputPrice: 0.66,
+    outputPrice: 1.98,
     reasoningPrice: 0,
     reasoningBillingRule: includedInOutput("official", "https://api-docs.deepseek.com/quick_start/pricing"),
-    cacheReadPrice: 0.003625,
+    cacheReadPrice: 0.022,
     cacheWritePrice: 0,
     sourceType: "official",
     sourceUrl: "https://api-docs.deepseek.com/quick_start/pricing",
@@ -269,17 +272,19 @@ export const CURRENT_EFFECTIVE_PRICING_SEED: SeedRow[] = [
     isManualOverride: false,
   },
   {
+    // Promotional pricing runs at least through 2026-11-21; rates are provisional.
+    // Cache write follows the vendor's stated 1.25x uncached-input rule (not listed on the promo row).
     id: "openai:gpt-5.6-sol",
     canonicalVendor: "openai",
     canonicalModel: "gpt-5.6-sol",
     vendorModelId: "gpt-5.6-sol",
     currency: "USD",
-    inputPrice: 5,
-    outputPrice: 30,
-    reasoningPrice: 30,
+    inputPrice: 4,
+    outputPrice: 20,
+    reasoningPrice: 20,
     reasoningBillingRule: perToken("official", "https://developers.openai.com/api/docs/models/gpt-5.6-sol"),
-    cacheReadPrice: 0.5,
-    cacheWritePrice: 6.25,
+    cacheReadPrice: 0.4,
+    cacheWritePrice: 5,
     sourceType: "official",
     sourceUrl: "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
     confidence: "high",
@@ -316,6 +321,24 @@ export const CURRENT_EFFECTIVE_PRICING_SEED: SeedRow[] = [
     cacheWritePrice: 1.25,
     sourceType: "official",
     sourceUrl: "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+    confidence: "high",
+    isManualOverride: false,
+  },
+  {
+    // Prices are the <=272K standard tier; requests above 272K input bill 2x input/cache and 1.5x output for the entire request.
+    id: "openai:gpt-6-astra",
+    canonicalVendor: "openai",
+    canonicalModel: "gpt-6-astra",
+    vendorModelId: "gpt-6-astra",
+    currency: "USD",
+    inputPrice: 10,
+    outputPrice: 50,
+    reasoningPrice: 50,
+    reasoningBillingRule: perToken("official", "https://developers.openai.com/api/docs/models/gpt-6-astra"),
+    cacheReadPrice: 1,
+    cacheWritePrice: 12.5,
+    sourceType: "official",
+    sourceUrl: "https://developers.openai.com/api/docs/models/gpt-6-astra",
     confidence: "high",
     isManualOverride: false,
   },
@@ -456,7 +479,7 @@ export const CURRENT_EFFECTIVE_PRICING_SEED: SeedRow[] = [
     isManualOverride: false,
   },
   {
-    // Introductory API pricing through 2026-08-31; official standard pricing is $3 input / $15 output afterward.
+    // $2/$10 is now permanent standard pricing: the previously scheduled increase to $3/$15 on 2026-09-01 was cancelled by the vendor.
     id: "anthropic:claude-sonnet-5",
     canonicalVendor: "anthropic",
     canonicalModel: "claude-sonnet-5",

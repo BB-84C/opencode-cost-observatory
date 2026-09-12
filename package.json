@@ -15,7 +15,9 @@
     "check": "tsc --noEmit",
     "test": "node --import tsx --test \"server/**/*.test.ts\" \"client/**/*.test.ts\" \"uploader/**/*.test.ts\"",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
-    "pricing:sync-current": "tsx server/commands/pricing-sync-current.ts"
+    "pricing:sync-current": "tsx server/commands/pricing-sync-current.ts",
+    "pricing:sync-upstream": "tsx server/commands/pricing-sync-upstream.ts",
+    "cost:backfill": "tsx server/commands/cost-backfill.ts"
   },
   "dependencies": {
     "@simplewebauthn/server": "^10.0.1",

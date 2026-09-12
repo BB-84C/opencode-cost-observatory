@@ -7,14 +7,14 @@ export type SqliteDatabase = InstanceType<typeof Database>
 
 const normalizedLegacySourceUrl = "runtime-bootstrap"
 const pricingSourceTypeNormalizationSql = `case
-  when lower(trim(source_type)) in ('manual', 'official', 'openrouter', 'websearch') then lower(trim(source_type))
+  when lower(trim(source_type)) in ('manual', 'official', 'openrouter', 'upstream', 'websearch') then lower(trim(source_type))
   else 'manual'
 end`
 const pricingSourceUrlNormalizationSql = `coalesce(nullif(trim(source_url), ''), '${normalizedLegacySourceUrl}')`
 const reasoningBillingRuleRepairPredicateSql = `reasoning_billing_rule_json is null
   or trim(reasoning_billing_rule_json) = ''
   or json_valid(reasoning_billing_rule_json) = 0
-  or lower(trim(coalesce(json_extract(reasoning_billing_rule_json, '$.provenance.sourceType'), ''))) not in ('manual', 'official', 'openrouter', 'websearch')
+  or lower(trim(coalesce(json_extract(reasoning_billing_rule_json, '$.provenance.sourceType'), ''))) not in ('manual', 'official', 'openrouter', 'upstream', 'websearch')
   or trim(coalesce(json_extract(reasoning_billing_rule_json, '$.provenance.sourceUrl'), '')) = ''`
 
 export function ensureParentDir(file: string) {
@@ -97,6 +97,11 @@ export function normalizeLegacySyncState(sqlite: SqliteDatabase) {
   `)
 }
 
+export function ensureMessageUsageCostColumn(sqlite: SqliteDatabase) {
+  if (!hasTable(sqlite, "message_usage_fact") || getColumnNames(sqlite, "message_usage_fact").has("cost_usd")) return
+  sqlite.exec("alter table message_usage_fact add column cost_usd real not null default 0")
+}
+
 export function normalizeLegacyPricingRecord(sqlite: SqliteDatabase) {
   if (!hasTable(sqlite, "pricing_record")) {
     return
@@ -156,6 +161,7 @@ export function normalizeLegacyPricingRecord(sqlite: SqliteDatabase) {
           source_type = 'manual'
           or source_type = 'official'
           or source_type = 'openrouter'
+          or source_type = 'upstream'
           or source_type = 'websearch'
         ),
         constraint pricing_record_source_url_non_blank check(length(trim(source_url)) > 0),

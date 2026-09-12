@@ -30,16 +30,16 @@ function seedAnalyticsDb() {
     const insertMessage = db.sqlite.prepare(`
       insert into message_usage_fact (
         message_id, session_id, project_id, parent_message_id, provider_id, model_id, time_created,
-        input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, total_tokens
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, total_tokens, cost_usd
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     insertSession.run("s1", null, "p1", "D:/work/one", "One", 100)
     insertSession.run("s2", "s1", "p1", "D:/work/two", "Two", 102)
     insertSession.run("s3", null, "p2", "D:/work/three", "Three", 104)
-    insertMessage.run("m1", "s1", "p1", null, "openai", "gpt-a", 101, 1, 2, 3, 4, 5, 15)
-    insertMessage.run("m2", "s2", "p1", "m1", "anthropic", "claude-b", 102, 10, 20, 30, 40, 50, 150)
-    insertMessage.run("m3", "s3", "p2", null, "openai", "gpt-c", 103, 100, 200, 300, 400, 500, 1500)
+    insertMessage.run("m1", "s1", "p1", null, "openai", "gpt-a", 101, 1, 2, 3, 4, 5, 15, 0.5)
+    insertMessage.run("m2", "s2", "p1", "m1", "anthropic", "claude-b", 102, 10, 20, 30, 40, 50, 150, 0)
+    insertMessage.run("m3", "s3", "p2", null, "openai", "gpt-c", 103, 100, 200, 300, 400, 500, 1500, 1.25)
   } finally {
     db.sqlite.close()
   }
@@ -53,6 +53,7 @@ test("readUploadBatch returns messages above watermark in ascending time order w
   const batch = readUploadBatch(analyticsDbPath, 100, 2)
 
   assert.deepEqual(batch.messages.map((row) => row.message_id), ["m1", "m2"])
+  assert.deepEqual(batch.messages.map((row) => row.cost_usd), [0.5, 0])
   assert.deepEqual(batch.sessions.map((row) => row.session_id), ["s1", "s2"])
   assert.equal(batch.latestTimeCreated, 102)
 })

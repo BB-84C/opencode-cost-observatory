@@ -46,6 +46,7 @@ type RawAssistantMessage = {
       write?: unknown
     }
   }
+  cost?: unknown
 }
 
 type SqliteDatabase = InstanceType<typeof BetterSqlite3>
@@ -170,6 +171,7 @@ export function normalizeAssistantMessage(row: RawMessage) {
     cacheReadTokens: toNumber(data.tokens?.cache?.read),
     cacheWriteTokens: toNumber(data.tokens?.cache?.write),
     totalTokens: toNumber(data.tokens?.total),
+    costUsd: toNumber(data.cost),
   }
 }
 
