@@ -60,10 +60,11 @@ function hasManualOverrideCoherenceConstraint(tableSql: string) {
 }
 
 function hasValidPricingSourceTypeConstraint(tableSql: string) {
-  return /source_type_valid/i.test(tableSql)
+  return /source_type_valid/i.test(tableSql) && /'upstream'/i.test(tableSql)
     || /source_type\s*=\s*'manual'/i.test(tableSql)
       && /source_type\s*=\s*'official'/i.test(tableSql)
       && /source_type\s*=\s*'openrouter'/i.test(tableSql)
+      && /source_type\s*=\s*'upstream'/i.test(tableSql)
       && /source_type\s*=\s*'websearch'/i.test(tableSql)
 }
 
